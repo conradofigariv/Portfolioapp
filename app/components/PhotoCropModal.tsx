@@ -33,6 +33,9 @@ export default function PhotoCropModal({
   aspect,
   position,
   onChange,
+  mobileAspect,
+  mobilePosition,
+  onChangeMobile,
   onDone,
   saving = false,
   storagePath,
@@ -44,6 +47,14 @@ export default function PhotoCropModal({
   aspect: number
   position?: string
   onChange: (position: string) => void
+  // The same photo can sit in a differently-shaped box on mobile (e.g. the
+  // hero portrait: square below `md`, a tall rectangle from `md` up) — one
+  // crop frame can't represent both. Providing these three adds a second,
+  // independent frame + a tab switcher to move between them; omit all three
+  // to keep the single-frame behavior every other caller still uses.
+  mobileAspect?: number
+  mobilePosition?: string
+  onChangeMobile?: (position: string) => void
   onDone: () => void
   saving?: boolean
   // Needed to re-encode a rotated copy under the same account folder and
@@ -54,6 +65,12 @@ export default function PhotoCropModal({
     newPublicUrl: string
   ) => Promise<{ ok: true } | { ok: false; error: string }>
 }) {
+  const hasMobileFrame = mobileAspect !== undefined && onChangeMobile !== undefined
+  const [mode, setMode] = useState<'desktop' | 'mobile'>('desktop')
+  const activeAspect = hasMobileFrame && mode === 'mobile' ? mobileAspect : aspect
+  const activePosition = hasMobileFrame && mode === 'mobile' ? mobilePosition : position
+  const activeOnChange = hasMobileFrame && mode === 'mobile' ? onChangeMobile! : onChange
+
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null)
   const imageRef = useRef<HTMLImageElement>(null)
   const drag = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null)
@@ -88,9 +105,10 @@ export default function PhotoCropModal({
       const result = await onRotated(newPath, data.publicUrl)
       if (!result.ok) throw new Error(result.error)
 
-      // The old frame position described a photo shape that no longer
+      // The old frame position(s) described a photo shape that no longer
       // applies once width/height swap.
       onChange('50% 50%')
+      if (hasMobileFrame) onChangeMobile!('50% 50%')
     } catch (err) {
       setRotateError(err instanceof Error ? err.message : 'Could not rotate that photo.')
     } finally {
@@ -98,7 +116,7 @@ export default function PhotoCropModal({
     }
   }
 
-  const [x, y] = parsePosition(position)
+  const [x, y] = parsePosition(activePosition)
 
   // The visible window, as a share of the photo. Only the axis with slack
   // shrinks; the other one always spans the whole photo.
@@ -106,8 +124,8 @@ export default function PhotoCropModal({
   let frameH = 100
   if (natural) {
     const imageAspect = natural.w / natural.h
-    if (imageAspect > aspect) frameW = (aspect / imageAspect) * 100
-    else frameH = (imageAspect / aspect) * 100
+    if (imageAspect > activeAspect) frameW = (activeAspect / imageAspect) * 100
+    else frameH = (imageAspect / activeAspect) * 100
   }
 
   const left = ((100 - frameW) * x) / 100
@@ -132,7 +150,7 @@ export default function PhotoCropModal({
 
     const nextX = slackX > 0 ? clamp(start.startX + ((e.clientX - start.x) / slackX) * 100) : 50
     const nextY = slackY > 0 ? clamp(start.startY + ((e.clientY - start.y) / slackY) * 100) : 50
-    onChange(`${Math.round(nextX)}% ${Math.round(nextY)}%`)
+    activeOnChange(`${Math.round(nextX)}% ${Math.round(nextY)}%`)
   }
 
   function onPointerUp() {
@@ -149,6 +167,29 @@ export default function PhotoCropModal({
         className="flex flex-col items-center gap-3 max-w-full"
         onClick={(e) => e.stopPropagation()}
       >
+        {hasMobileFrame && (
+          <div className="flex items-center gap-1 rounded-lg border border-dark-600 p-0.5 text-xs font-mono">
+            <button
+              type="button"
+              onClick={() => setMode('desktop')}
+              className={`px-3 py-1 rounded-md transition ${
+                mode === 'desktop' ? 'bg-dark-50 text-dark-900 font-bold' : 'text-dark-400 hover:text-dark-50'
+              }`}
+            >
+              Desktop
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('mobile')}
+              className={`px-3 py-1 rounded-md transition ${
+                mode === 'mobile' ? 'bg-dark-50 text-dark-900 font-bold' : 'text-dark-400 hover:text-dark-50'
+              }`}
+            >
+              Mobile
+            </button>
+          </div>
+        )}
+
         <div className="flex items-center gap-3">
           <p className="text-xs text-dark-300 text-center">
             {rotating
