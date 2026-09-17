@@ -19,9 +19,16 @@ export default function EditablePortrait() {
   const [preview, setPreview] = useState<string | null>(null)
   const [uploadedPath, setUploadedPath] = useState<string | null>(null)
   const [position, setPosition] = useState<string | undefined>(undefined)
+  const [positionMobile, setPositionMobile] = useState<string | undefined>(undefined)
 
   const portrait = preview ?? media.portrait?.src ?? null
   const storagePath = uploadedPath ?? (media.portrait ? storagePathFromPublicUrl(media.portrait.src) : null)
+  const rawPosition = position ?? media.portrait?.position
+  // Falls back to the desktop position, not left undefined — a photo whose
+  // owner has only ever set the one (desktop) focal point should still crop
+  // sensibly on mobile rather than snapping to the crop tool's own
+  // dead-center default.
+  const rawPositionMobile = positionMobile ?? media.portrait?.positionMobile ?? rawPosition
 
   async function onPick(file: File) {
     if (busy) return
@@ -54,6 +61,7 @@ export default function EditablePortrait() {
       setPreview(URL.createObjectURL(image))
       setUploadedPath(path)
       setPosition(undefined)
+      setPositionMobile(undefined)
       router.refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not upload that photo.')
@@ -68,6 +76,7 @@ export default function EditablePortrait() {
     setPreview(newPublicUrl)
     setUploadedPath(newStoragePath)
     setPosition(undefined)
+    setPositionMobile(undefined)
     router.refresh()
     return { ok: true as const }
   }
@@ -92,16 +101,35 @@ export default function EditablePortrait() {
 
       <div className="relative w-full md:w-72 h-full rounded-2xl overflow-hidden border border-dark-600 group">
         {portrait ? (
-          <Image
-            src={portrait}
-            alt={media.portrait?.alt ?? content.hero.name}
-            fill
-            quality={90}
-            unoptimized={portrait.startsWith('blob:')}
-            style={{ objectPosition: position ?? media.portrait?.position ?? '50% 0%' }}
-            className="object-cover"
-            priority
-          />
+          <>
+            {/* Mobile position — the square box below `md` needs its own
+                focal point, independent of the taller desktop crop below. */}
+            <div className="md:hidden absolute inset-0">
+              <Image
+                src={portrait}
+                alt={media.portrait?.alt ?? content.hero.name}
+                fill
+                quality={90}
+                unoptimized={portrait.startsWith('blob:')}
+                style={{ objectPosition: rawPositionMobile ?? '50% 0%' }}
+                className="object-cover"
+                priority
+              />
+            </div>
+            {/* Desktop position */}
+            <div className="hidden md:block absolute inset-0">
+              <Image
+                src={portrait}
+                alt={media.portrait?.alt ?? content.hero.name}
+                fill
+                quality={90}
+                unoptimized={portrait.startsWith('blob:')}
+                style={{ objectPosition: rawPosition ?? '50% 0%' }}
+                className="object-cover"
+                priority
+              />
+            </div>
+          </>
         ) : (
           <div className="absolute inset-0 grid place-items-center bg-dark-800 text-dark-500 text-sm">
             No photo yet
@@ -133,8 +161,14 @@ export default function EditablePortrait() {
             // The portrait box is a fixed 18rem wide and stretches to the text
             // column's height — roughly this, whatever the copy length.
             aspect={0.62}
-            position={position ?? media.portrait?.position}
+            position={rawPosition}
             onChange={setPosition}
+            // The mobile box is a full-width square (see the wrapper above) —
+            // a second, independently draggable square frame in the crop
+            // modal, rather than reusing the desktop rectangle's position.
+            mobileAspect={1}
+            mobilePosition={rawPositionMobile}
+            onChangeMobile={setPositionMobile}
             onRotated={onRotated}
             triggerClassName="absolute top-2 left-2 z-10 px-2 py-1 rounded-md bg-dark-900/70 text-dark-50 text-xs font-medium opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
           />

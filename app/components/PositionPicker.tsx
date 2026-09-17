@@ -16,6 +16,9 @@ export default function PositionPicker({
   aspect,
   position,
   onChange,
+  mobileAspect,
+  mobilePosition,
+  onChangeMobile,
   onRotated,
   triggerClassName = 'text-xs font-medium text-dark-50',
 }: {
@@ -26,6 +29,12 @@ export default function PositionPicker({
   aspect: number
   position?: string
   onChange: (position: string) => void
+  // See PhotoCropModal — providing all three adds a second, independently
+  // draggable frame + a Desktop/Mobile tab switcher for a photo that sits in
+  // a differently-shaped box on mobile than on desktop.
+  mobileAspect?: number
+  mobilePosition?: string
+  onChangeMobile?: (position: string) => void
   // Re-encodes the photo rotated 90° and points the stored row at the
   // result. Omit to hide the rotate control (e.g. for photos with no
   // dedicated save action to call).
@@ -38,10 +47,15 @@ export default function PositionPicker({
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const router = useRouter()
+  const hasMobileFrame = mobileAspect !== undefined && onChangeMobile !== undefined
 
   async function done() {
     setSaving(true)
-    const result = await saveMediaPosition(storagePath, position ?? '50% 50%')
+    const result = await saveMediaPosition(
+      storagePath,
+      position ?? '50% 50%',
+      hasMobileFrame ? mobilePosition ?? '50% 50%' : undefined
+    )
     setSaving(false)
     setOpen(false)
     if (result.ok) router.refresh()
@@ -60,6 +74,9 @@ export default function PositionPicker({
           aspect={aspect}
           position={position}
           onChange={onChange}
+          mobileAspect={mobileAspect}
+          mobilePosition={mobilePosition}
+          onChangeMobile={onChangeMobile}
           onDone={done}
           saving={saving}
           storagePath={storagePath}

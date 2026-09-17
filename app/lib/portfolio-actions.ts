@@ -598,34 +598,50 @@ export async function reorderProjectPhotos(
  * chosen by dragging the crop frame over the photo. Works for any media row —
  * portrait, chapter, or project photo — since storage_path is unique per
  * portfolio.
+ *
+ * `positionMobile` is a second, independent focal point for a box that's a
+ * different shape on mobile than on desktop (e.g. the hero portrait: square
+ * below `md`, a tall rectangle from `md` up) — one position can't be right
+ * for both shapes. Optional: omit it to leave the mobile column untouched,
+ * which is what every caller without a dedicated mobile crop step still does.
  */
 export async function saveMediaPosition(
   storagePath: string,
-  position: string
+  position: string,
+  positionMobile?: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const supabase = await createClient()
+  try {
+    const supabase = await createClient()
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return { ok: false, error: 'You are not signed in.' }
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return { ok: false, error: 'You are not signed in.' }
 
-  const { data: portfolio } = await supabase
-    .from('portfolios')
-    .select('id')
-    .eq('user_id', user.id)
-    .maybeSingle()
-  if (!portfolio) return { ok: false, error: 'Your portfolio is still being set up.' }
+    const { data: portfolio } = await supabase
+      .from('portfolios')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+    if (!portfolio) return { ok: false, error: 'Your portfolio is still being set up.' }
 
-  const { error } = await supabase
-    .from('portfolio_media')
-    .update({ position: position.slice(0, 50) })
-    .eq('portfolio_id', portfolio.id)
-    .eq('storage_path', storagePath)
-  if (error) return { ok: false, error: error.message }
+    const update: { position: string; position_mobile?: string } = {
+      position: position.slice(0, 50),
+    }
+    if (positionMobile !== undefined) update.position_mobile = positionMobile.slice(0, 50)
 
-  revalidatePath('/', 'layout')
-  return { ok: true }
+    const { error } = await supabase
+      .from('portfolio_media')
+      .update(update)
+      .eq('portfolio_id', portfolio.id)
+      .eq('storage_path', storagePath)
+    if (error) return { ok: false, error: error.message }
+
+    revalidatePath('/', 'layout')
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Could not save that position.' }
+  }
 }
 
 /**

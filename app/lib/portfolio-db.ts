@@ -19,6 +19,7 @@ type MediaRow = {
   alt: string
   sort_order: number
   position: string | null
+  position_mobile: string | null
 }
 
 type BlockRow = {
@@ -94,7 +95,12 @@ function buildMedia(rows: MediaRow[], publicUrl: (path: string) => string): Port
     const url = row.storage_path.startsWith('/')
       ? row.storage_path
       : publicUrl(row.storage_path)
-    const image: MediaImage = { src: url, alt: row.alt, position: row.position ?? undefined }
+    const image: MediaImage = {
+      src: url,
+      alt: row.alt,
+      position: row.position ?? undefined,
+      positionMobile: row.position_mobile ?? undefined,
+    }
 
     switch (row.kind) {
       case 'portrait':
@@ -166,7 +172,7 @@ export async function loadPortfolio(
 
   const { data: mediaRows } = await supabase
     .from('portfolio_media')
-    .select('kind, target_id, storage_path, alt, sort_order, position')
+    .select('kind, target_id, storage_path, alt, sort_order, position, position_mobile')
     .eq('portfolio_id', portfolio.id)
 
   const { data: blockRows } = await supabase
