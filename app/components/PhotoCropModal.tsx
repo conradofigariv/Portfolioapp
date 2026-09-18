@@ -235,7 +235,22 @@ export default function PhotoCropModal({
         </div>
         {rotateError && <p className="text-xs text-red-400 text-center max-w-72">{rotateError}</p>}
 
-        <div className="relative inline-block leading-none select-none min-h-[40vh] min-w-[40vw]">
+        {/* min-h/min-w reserve space only while the natural size is still
+            unknown (the loading spinner below has nothing else to size
+            against) — once it's loaded, this must shrink-wrap to exactly the
+            <img>'s own rendered box, or the frame below (positioned in
+            percentages of *this* element) ends up wider/taller than the
+            actual photo. A portrait-oriented photo capped by max-h-[70vh]
+            can render narrower than 40vw, which is exactly when the min-w
+            used to keep leaking through: the crop frame's right edge then
+            sat well past the visible image, over empty space (in practice,
+            the real page bleeding through the modal's translucent backdrop)
+            — reported live with a screenshot after this shipped. */}
+        <div
+          className={`relative inline-block leading-none select-none ${
+            natural ? '' : 'min-h-[40vh] min-w-[40vw]'
+          }`}
+        >
           {(!natural || rotating) && (
             <div className="absolute inset-0 flex items-center justify-center z-10">
               <div className="w-8 h-8 rounded-full border-2 border-dark-500 border-t-dark-50 animate-spin" />
