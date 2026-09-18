@@ -67,6 +67,17 @@ export default function PhotoCropModal({
 }) {
   const hasMobileFrame = mobileAspect !== undefined && onChangeMobile !== undefined
   const [mode, setMode] = useState<'desktop' | 'mobile'>('desktop')
+  // Tracks which tab(s) the owner has actually looked at, so the switcher can
+  // show a checkmark once a shape has been reviewed — the frame's *default*
+  // position (inherited from the other shape, or dead-center) is otherwise
+  // indistinguishable from one the owner deliberately confirmed, which is
+  // exactly what made it easy to set only one shape and never notice the
+  // other still needed a look.
+  const [visited, setVisited] = useState<Set<'desktop' | 'mobile'>>(() => new Set(['desktop']))
+  function selectMode(next: 'desktop' | 'mobile') {
+    setMode(next)
+    setVisited((prev) => (prev.has(next) ? prev : new Set(prev).add(next)))
+  }
   const activeAspect = hasMobileFrame && mode === 'mobile' ? mobileAspect : aspect
   const activePosition = hasMobileFrame && mode === 'mobile' ? mobilePosition : position
   const activeOnChange = hasMobileFrame && mode === 'mobile' ? onChangeMobile! : onChange
@@ -168,26 +179,31 @@ export default function PhotoCropModal({
         onClick={(e) => e.stopPropagation()}
       >
         {hasMobileFrame && (
-          <div className="flex items-center gap-1 rounded-lg border border-dark-600 p-0.5 text-xs font-mono">
-            <button
-              type="button"
-              onClick={() => setMode('desktop')}
-              className={`px-3 py-1 rounded-md transition ${
-                mode === 'desktop' ? 'bg-dark-50 text-dark-900 font-bold' : 'text-dark-400 hover:text-dark-50'
-              }`}
-            >
-              Desktop
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode('mobile')}
-              className={`px-3 py-1 rounded-md transition ${
-                mode === 'mobile' ? 'bg-dark-50 text-dark-900 font-bold' : 'text-dark-400 hover:text-dark-50'
-              }`}
-            >
-              Mobile
-            </button>
-          </div>
+          <>
+            <p className="text-xs text-dark-300 text-center max-w-72">
+              This photo shows differently on mobile and desktop — set the crop for both.
+            </p>
+            <div className="flex items-center gap-1 rounded-lg border border-dark-600 p-0.5 text-xs font-mono">
+              <button
+                type="button"
+                onClick={() => selectMode('desktop')}
+                className={`px-3 py-1 rounded-md transition ${
+                  mode === 'desktop' ? 'bg-dark-50 text-dark-900 font-bold' : 'text-dark-400 hover:text-dark-50'
+                }`}
+              >
+                Desktop{visited.has('desktop') ? ' ✓' : ''}
+              </button>
+              <button
+                type="button"
+                onClick={() => selectMode('mobile')}
+                className={`px-3 py-1 rounded-md transition ${
+                  mode === 'mobile' ? 'bg-dark-50 text-dark-900 font-bold' : 'text-dark-400 hover:text-dark-50'
+                }`}
+              >
+                Mobile{visited.has('mobile') ? ' ✓' : ''}
+              </button>
+            </div>
+          </>
         )}
 
         <div className="flex items-center gap-3">

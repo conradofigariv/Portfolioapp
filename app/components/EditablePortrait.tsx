@@ -20,6 +20,11 @@ export default function EditablePortrait() {
   const [uploadedPath, setUploadedPath] = useState<string | null>(null)
   const [position, setPosition] = useState<string | undefined>(undefined)
   const [positionMobile, setPositionMobile] = useState<string | undefined>(undefined)
+  // Opened automatically right after a fresh upload — a photo crops
+  // differently on mobile than on desktop, and nothing else would tell the
+  // owner the mobile crop needs a look too (see PhotoCropModal's own
+  // Desktop/Mobile hint, shown once this opens it).
+  const [cropOpen, setCropOpen] = useState(false)
 
   const portrait = preview ?? media.portrait?.src ?? null
   const storagePath = uploadedPath ?? (media.portrait ? storagePathFromPublicUrl(media.portrait.src) : null)
@@ -62,6 +67,7 @@ export default function EditablePortrait() {
       setUploadedPath(path)
       setPosition(undefined)
       setPositionMobile(undefined)
+      setCropOpen(true)
       router.refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not upload that photo.')
@@ -170,6 +176,8 @@ export default function EditablePortrait() {
             mobilePosition={rawPositionMobile}
             onChangeMobile={setPositionMobile}
             onRotated={onRotated}
+            open={cropOpen}
+            onOpenChange={setCropOpen}
             triggerClassName="absolute top-2 left-2 z-10 px-2 py-1 rounded-md bg-dark-900/70 text-dark-50 text-xs font-medium opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
           />
         )}

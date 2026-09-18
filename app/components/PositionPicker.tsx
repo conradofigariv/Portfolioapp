@@ -21,6 +21,8 @@ export default function PositionPicker({
   onChangeMobile,
   onRotated,
   triggerClassName = 'text-xs font-medium text-dark-50',
+  open: controlledOpen,
+  onOpenChange,
 }: {
   storagePath: string
   src: string
@@ -43,10 +45,20 @@ export default function PositionPicker({
     newPublicUrl: string
   ) => Promise<{ ok: true } | { ok: false; error: string }>
   triggerClassName?: string
+  // Both optional — when omitted this manages its own open state exactly as
+  // before (every caller but EditablePortrait). EditablePortrait controls
+  // this to auto-open the modal right after a fresh upload, since a photo
+  // with two differently-shaped crops otherwise has no visible sign the
+  // mobile one needs setting too until the owner happens to check mobile.
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const router = useRouter()
+  const isControlled = controlledOpen !== undefined
+  const open = isControlled ? controlledOpen : internalOpen
+  const setOpen = isControlled ? onOpenChange! : setInternalOpen
   const hasMobileFrame = mobileAspect !== undefined && onChangeMobile !== undefined
 
   async function done() {
