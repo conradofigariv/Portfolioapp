@@ -423,6 +423,115 @@ export async function removeChapterPhoto(
   return { ok: true }
 }
 
+/**
+ * Attaches one file — the certificate itself, a PDF or a photo of it — to a
+ * certification. A single-file container, same shape as a chapter photo: any
+ * previous file is deleted (row and storage object) before the new one is
+ * inserted, so "replace" is just another call to this.
+ *
+ * `certId` is the certification's block-list item id. Those ids are per
+ * language (a paired block list isn't synced across EN/ES — see
+ * usePairedBlockList), so the file follows the certification item it was
+ * attached to rather than being shared between the two languages.
+ */
+export async function saveCertificationFile(
+  certId: string,
+  storagePath: string,
+  alt: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const supabase = await createClient()
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return { ok: false, error: 'You are not signed in.' }
+
+    if (!storagePath.startsWith(`${user.id}/`)) {
+      return { ok: false, error: 'That file does not belong to your account.' }
+    }
+
+    const { data: portfolio } = await supabase
+      .from('portfolios')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+    if (!portfolio) return { ok: false, error: 'Your portfolio is still being set up.' }
+
+    const { data: previous } = await supabase
+      .from('portfolio_media')
+      .select('id, storage_path')
+      .eq('portfolio_id', portfolio.id)
+      .eq('kind', 'certification')
+      .eq('target_id', certId)
+
+    if (previous?.length) {
+      await supabase.from('portfolio_media').delete().in('id', previous.map((row) => row.id))
+      const owned = previous.map((row) => row.storage_path).filter((path) => !path.startsWith('/'))
+      if (owned.length) await supabase.storage.from(BUCKET).remove(owned)
+    }
+
+    const { error } = await supabase.from('portfolio_media').insert({
+      portfolio_id: portfolio.id,
+      kind: 'certification',
+      target_id: certId,
+      storage_path: storagePath,
+      alt: alt.slice(0, 200),
+    })
+    if (error) return { ok: false, error: error.message }
+
+    revalidatePath('/', 'layout')
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Could not save that file.' }
+  }
+}
+
+/**
+ * Drops a certification's file, both the row and the stored object. Called
+ * both by the owner's own "Remove file" control and by removing the whole
+ * certification — the block-list removal only deletes that item's text
+ * blocks, so without this the file would be orphaned under an id nothing can
+ * reference again (see "Orphaned data on delete" in CLAUDE.md).
+ */
+export async function removeCertificationFile(
+  certId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const supabase = await createClient()
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return { ok: false, error: 'You are not signed in.' }
+
+    const { data: portfolio } = await supabase
+      .from('portfolios')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+    if (!portfolio) return { ok: false, error: 'Your portfolio is still being set up.' }
+
+    const { data: rows } = await supabase
+      .from('portfolio_media')
+      .select('id, storage_path')
+      .eq('portfolio_id', portfolio.id)
+      .eq('kind', 'certification')
+      .eq('target_id', certId)
+
+    if (rows?.length) {
+      await supabase.from('portfolio_media').delete().in('id', rows.map((row) => row.id))
+      const owned = rows.map((row) => row.storage_path).filter((path) => !path.startsWith('/'))
+      if (owned.length) await supabase.storage.from(BUCKET).remove(owned)
+    }
+
+    revalidatePath('/', 'layout')
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Could not remove that file.' }
+  }
+}
+
 const MAX_PROJECT_PHOTOS = 4
 
 /**

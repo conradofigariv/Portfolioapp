@@ -2,10 +2,12 @@
 
 import { useLang } from '../context/LanguageContext'
 import { usePairedBlockList } from '../lib/editor/usePairedBlockList'
+import { plainTextFromDoc } from '../lib/editor/render-html'
 import RichText from './editor/EditableText'
 import SkillCategoryCard from './SkillCategoryCard'
-import { AddButton, RemoveButton } from './EditControls'
-import { deleteSkillCategoryData } from '../lib/portfolio-actions'
+import CertificationCard from './CertificationCard'
+import { AddButton } from './EditControls'
+import { deleteSkillCategoryData, removeCertificationFile } from '../lib/portfolio-actions'
 
 const CERT_FIELDS = ['title', 'issuer'] as const
 
@@ -14,7 +16,7 @@ function newSkillCategoryId() {
 }
 
 export default function Skills() {
-  const { t, content, editing, updateActive, lang } = useLang()
+  const { t, content, editing, updateActive, lang, blocks } = useLang()
   const s = content.skills
   const {
     items: certs,
@@ -81,27 +83,27 @@ export default function Skills() {
           <h3 className="text-lg md:text-xl font-semibold mb-6 md:mb-8 text-dark-50">{t.skills.certifications}</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
             {certs.map((cert) => (
-              <div
+              <CertificationCard
                 key={cert.itemId}
-                className="flex items-start gap-3 md:gap-4 bg-dark-900/50 p-4 md:p-6 rounded-xl border border-dark-700 hover:border-dark-500 transition"
+                certId={cert.itemId}
+                title={plainTextFromDoc(blocks[cert.blockKeys.title]?.[lang]?.json)}
+                removing={certsBusy}
+                onRemove={() => {
+                  removeCert(cert.itemId)
+                  // Same reasoning as removing a project/chapter/category: the
+                  // block removal above never touches portfolio_media, so this
+                  // certification's uploaded file would be orphaned under an id
+                  // nothing can reference again.
+                  void removeCertificationFile(cert.itemId)
+                }}
               >
-                <span className="text-lg md:text-xl flex-shrink-0">📜</span>
-                <div className="flex-1">
-                  <h4 className="font-semibold text-dark-50 mb-1 text-xs md:text-sm leading-snug">
-                    <RichText blockKey={cert.blockKeys.title} section="skills" placeholder="Certification" />
-                  </h4>
-                  <div className="text-dark-400 text-xs">
-                    <RichText blockKey={cert.blockKeys.issuer} section="skills" placeholder="Issuer" />
-                  </div>
+                <h4 className="font-semibold text-dark-50 mb-1 text-xs md:text-sm leading-snug">
+                  <RichText blockKey={cert.blockKeys.title} section="skills" placeholder="Certification" />
+                </h4>
+                <div className="text-dark-400 text-xs">
+                  <RichText blockKey={cert.blockKeys.issuer} section="skills" placeholder="Issuer" />
                 </div>
-                {editing && (
-                  <RemoveButton
-                    label="Remove certification"
-                    disabled={certsBusy}
-                    onClick={() => removeCert(cert.itemId)}
-                  />
-                )}
-              </div>
+              </CertificationCard>
             ))}
           </div>
           {editing && (

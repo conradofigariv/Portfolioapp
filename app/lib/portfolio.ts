@@ -70,6 +70,11 @@ export type PortfolioMedia = {
   cv: string | null
   projectImages: Record<string, MediaImage[]>
   chapterPhotos: Record<string, MediaImage>
+  // One optional file per certification (the certificate itself, a PDF or a
+  // photo of it), keyed by that certification's block-list item id. Unlike
+  // every other entry here it can be a PDF, so a reader has to branch on the
+  // source's extension rather than assume an image — see CertificationCard.
+  certFiles: Record<string, MediaImage>
 }
 
 // A rich text field migrated to portfolio_blocks (Tiptap), replacing its
@@ -196,6 +201,9 @@ const CONRADO_MEDIA: PortfolioMedia = {
     },
     [chapterId(4)]: { src: '/EPEC.jpg', alt: 'EPEC building', position: 'right center' },
   },
+  // Seeded empty: a certificate file is something an owner uploads, not
+  // something the starting template can ship a stand-in for.
+  certFiles: {},
 }
 
 // Conrado's portfolio, and the template new accounts start from.

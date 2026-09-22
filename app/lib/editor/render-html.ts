@@ -206,3 +206,20 @@ export function isEmptyDoc(doc: JSONContent | null | undefined): boolean {
   if (!doc) return true
   return renderBlockHtml(doc).replace(/<p[^>]*><\/p>/g, '').trim() === ''
 }
+
+/**
+ * The field's text with no markup at all — for the places a rich text value
+ * has to become a plain string (an alt attribute, a heading in a modal, a
+ * value stored in a text column). Walks the JSON rather than stripping tags
+ * off the rendered HTML, so there are no escaped entities to decode back.
+ */
+export function plainTextFromDoc(doc: JSONContent | null | undefined): string {
+  if (!doc) return ''
+  let text = ''
+  const walk = (node: JSONContent) => {
+    if (typeof node.text === 'string') text += node.text
+    node.content?.forEach(walk)
+  }
+  walk(doc)
+  return text.replace(/\s+/g, ' ').trim()
+}

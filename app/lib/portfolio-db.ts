@@ -87,6 +87,7 @@ function buildMedia(rows: MediaRow[], publicUrl: (path: string) => string): Port
     cv: null,
     projectImages: {},
     chapterPhotos: {},
+    certFiles: {},
   }
 
   for (const row of [...rows].sort((a, b) => a.sort_order - b.sort_order)) {
@@ -120,6 +121,9 @@ function buildMedia(rows: MediaRow[], publicUrl: (path: string) => string): Port
         break
       case 'chapter':
         if (row.target_id) media.chapterPhotos[row.target_id] = image
+        break
+      case 'certification':
+        if (row.target_id) media.certFiles[row.target_id] = image
         break
     }
   }
