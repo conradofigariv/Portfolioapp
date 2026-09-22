@@ -79,6 +79,27 @@ export function validateImageFile(file: File): string | null {
   return null
 }
 
+export const PDF_TYPE = 'application/pdf'
+
+/**
+ * A certificate can be a PDF as well as a photo — the only upload in this app
+ * that isn't an image. A PDF is stored as-is (compressImage is a canvas →
+ * WebP round trip, meaningless for a document), so unlike an image it has no
+ * compression step to pull it back under the bucket's own 10MB ceiling: the
+ * size check here is the only thing standing between the owner and a storage
+ * rejection they'd have no context for.
+ */
+export function validateCertificationFile(file: File): string | null {
+  const isPdf = file.type === PDF_TYPE
+  if (!isPdf && !file.type.startsWith('image/')) return 'That file is not a PDF or an image.'
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return isPdf
+      ? 'That PDF is over 10MB. Pick a smaller one.'
+      : 'That image is over 10MB. Pick a smaller one.'
+  }
+  return null
+}
+
 // Date.now() alone can collide: a fast double-click fires two uploads in the
 // same millisecond, and Supabase Storage rejects the second with "The
 // resource already exists" (upsert is intentionally off). The random suffix

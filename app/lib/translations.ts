@@ -283,6 +283,9 @@ export const translations = {
         },
       ],
       certifications: 'Certifications',
+      viewCertificate: 'View certificate',
+      downloadCertificate: 'Download',
+      closeCertificate: 'Close',
       certs: [
         { title: 'Professional Scrum Product Owner I (PSPO I)', issuer: 'Scrum.org' },
         { title: 'Electronic Engineering', issuer: 'Universidad Tecnológica Nacional, FRC' },
@@ -595,6 +598,9 @@ export const translations = {
         },
       ],
       certifications: 'Certificaciones',
+      viewCertificate: 'Ver certificado',
+      downloadCertificate: 'Descargar',
+      closeCertificate: 'Cerrar',
       certs: [
         { title: 'Professional Scrum Product Owner I (PSPO I)', issuer: 'Scrum.org' },
         { title: 'Ingeniería Electrónica', issuer: 'Universidad Tecnológica Nacional, FRC' },
