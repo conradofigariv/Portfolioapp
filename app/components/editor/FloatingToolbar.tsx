@@ -17,7 +17,6 @@ import AlignmentGroup from './toolbar/AlignmentGroup'
 // this delay keeps the toolbar from flickering in and out on every click.
 // A real text selection (rule 2) skips it entirely; that's a deliberate act.
 const FOCUS_DELAY_MS = 120
-const SCROLL_HIDE_THRESHOLD = 4
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 const modKey = isMac ? '⌘' : 'Ctrl'
@@ -41,10 +40,16 @@ function selectionRect(editor: Editor): DOMRect {
   return new DOMRect(left, top, Math.max(start.right, end.right) - left, Math.max(start.bottom, end.bottom) - top)
 }
 
+// True once the rect's own box no longer overlaps the viewport at all — the
+// signal used to actually hide the toolbar on scroll, replacing a raw
+// window.scrollX/Y distance check (see the scroll handler below for why).
+function isOffscreen(rect: DOMRect): boolean {
+  return rect.bottom < 0 || rect.top > window.innerHeight
+}
+
 export default function FloatingToolbar({ editor }: { editor: Editor | null }) {
   const [visible, setVisible] = useState(false)
   const showTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const scrollOrigin = useRef<{ x: number; y: number } | null>(null)
   const reduceMotion = useReducedMotion()
 
   // The link popover's input needs real DOM focus to type into, which fires
@@ -80,14 +85,28 @@ export default function FloatingToolbar({ editor }: { editor: Editor | null }) {
     if (!editor) return
     const activeEditor = editor
 
-    function place() {
+    // Reads the caret's *current* screen position fresh via coordsAtPos —
+    // called again on every reposition (focus, selection change, and scroll
+    // below), never cached. A virtual reference whose getBoundingClientRect
+    // returned a value captured once at focus time used to go stale the
+    // instant the page scrolled afterward: floating-ui's autoUpdate does
+    // re-invoke that function on scroll, but a closure returning the same
+    // frozen DOMRect every time just reproduces the same (now wrong)
+    // position — coordsAtPos is viewport-relative, exactly like
+    // getBoundingClientRect, so it only stays correct if it's actually
+    // re-read after the scroll, not replayed from before it.
+    function setReferenceFromSelection() {
       const rect = selectionRect(activeEditor)
       const virtual: VirtualElement = {
         getBoundingClientRect: () => rect,
         contextElement: activeEditor.view.dom,
       }
       refs.setReference(virtual)
-      scrollOrigin.current = { x: window.scrollX, y: window.scrollY }
+      return rect
+    }
+
+    function place() {
+      setReferenceFromSelection()
       setVisible(true)
     }
 
@@ -148,12 +167,27 @@ export default function FloatingToolbar({ editor }: { editor: Editor | null }) {
         setLinkOpen(true)
       }
     }
+    // Re-reads the caret's position on every scroll rather than hiding on a
+    // raw window.scrollX/Y distance — see setReferenceFromSelection's own
+    // comment above for why a distance check on window scroll used to leave
+    // the toolbar visibly wrong for a stretch before it caught up. This
+    // matters most on mobile: focusing a field triggers the browser's own
+    // scroll-the-input-into-view-above-the-keyboard animation, which fires a
+    // burst of scroll events the toolbar now has to track live rather than
+    // race. Only actually hides once the caret itself has scrolled off the
+    // visible viewport — not merely "the page moved a few pixels."
     function onScroll() {
-      const origin = scrollOrigin.current
-      if (!origin) return
-      const dx = Math.abs(window.scrollX - origin.x)
-      const dy = Math.abs(window.scrollY - origin.y)
-      if (dx > SCROLL_HIDE_THRESHOLD || dy > SCROLL_HIDE_THRESHOLD) setVisible(false)
+      if (!editor) return
+      const rect = selectionRect(editor)
+      if (isOffscreen(rect)) {
+        setVisible(false)
+        return
+      }
+      const virtual: VirtualElement = {
+        getBoundingClientRect: () => rect,
+        contextElement: editor.view.dom,
+      }
+      refs.setReference(virtual)
     }
 
     window.addEventListener('keydown', onKeyDown)
@@ -162,7 +196,7 @@ export default function FloatingToolbar({ editor }: { editor: Editor | null }) {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('scroll', onScroll, true)
     }
-  }, [visible, editor])
+  }, [visible, editor, refs])
 
   if (!editor) return null
 
