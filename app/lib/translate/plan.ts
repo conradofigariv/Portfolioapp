@@ -71,8 +71,16 @@ export type TranslationPlan = {
   unchanged: number
   /** Source row exists but has no text at all — nothing to translate. */
   emptySource: number
-  /** Source text contains no letters ("50+", "2013 — 2020"). */
-  notTranslatable: number
+  /**
+   * How many of the planned fields above carry no letters at all ("50+",
+   * "2013 — 2020"). They are planned like any other field, because the target
+   * language still needs its own row — otherwise the English page shows a blank
+   * where the Spanish one shows "50+". They just cost no model call:
+   * `translateBatch` resolves a field with nothing translatable in it by copying
+   * the source document verbatim. Reported separately so the progress UI can
+   * say "N copied as-is" rather than implying they were translated.
+   */
+  languageNeutral: number
 }
 
 /** The whole field's text, as one string, for the emptiness checks below. */
@@ -81,11 +89,14 @@ function joinedText(texts: string[]): string {
 }
 
 /**
- * Whether a field is worth a model call at all. A field whose entire text has
- * no letter in it — a number, a year range, a "+", a "%" — reads identically
- * in both languages, so sending it costs tokens and risks the model
- * "helpfully" rewriting a figure. `\p{L}` rather than a-z so accented and
- * non-Latin text counts; "8 years" still has letters and is still translated.
+ * Whether a field needs a model call at all. A field whose entire text has no
+ * letter in it — a number, a year range, a "+", a "%" — reads identically in
+ * both languages, so sending it costs tokens and risks the model "helpfully"
+ * rewriting a figure. `\p{L}` rather than a-z so accented and non-Latin text
+ * counts; "8 years" still has letters and is still translated.
+ *
+ * Note this only decides *how* the field gets filled, not *whether*: it is
+ * still planned, and still gets a target row (see `languageNeutral`).
  */
 function hasTranslatableText(texts: string[]): boolean {
   return /\p{L}/u.test(joinedText(texts))
@@ -142,7 +153,7 @@ export function planTranslation(
     stale: [],
     unchanged: 0,
     emptySource: 0,
-    notTranslatable: 0,
+    languageNeutral: 0,
   }
 
   for (const blockKey of [...sources.keys()].sort()) {
@@ -151,10 +162,6 @@ export function planTranslation(
 
     if (isEmpty(texts)) {
       plan.emptySource++
-      continue
-    }
-    if (!hasTranslatableText(texts)) {
-      plan.notTranslatable++
       continue
     }
 
@@ -174,17 +181,20 @@ export function planTranslation(
     // its translation rather than being read as deliberate content.
     if (!target || isEmpty(extractTextNodes(target.json))) {
       plan.missing.push(field)
+    } else if (isNewer(source.updatedAt, target.updatedAt)) {
+      plan.stale.push(field)
+    } else {
+      plan.unchanged++
       continue
     }
 
-    if (isNewer(source.updatedAt, target.updatedAt)) plan.stale.push(field)
-    else plan.unchanged++
+    if (!hasTranslatableText(texts)) plan.languageNeutral++
   }
 
   return plan
 }
 
-/** How many model-bound fields the plan holds, for progress UI and chunking. */
+/** How many fields the plan would fill, for progress UI and chunking. */
 export function plannedCount(plan: TranslationPlan, includeStale: boolean): number {
   return plan.missing.length + (includeStale ? plan.stale.length : 0)
 }
