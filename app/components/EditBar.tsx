@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useLang } from '../context/LanguageContext'
 import { savePortfolio } from '../lib/portfolio-actions'
+import TranslatePanel from './TranslatePanel'
 
 // How long the "Saved"/"Guardado" flash stays up after a block autosaves —
 // long enough to notice, short enough to not linger once it's stopped
@@ -14,11 +15,12 @@ const FLASH_MS = 1600
 // Floats above the portfolio while its owner is editing. Everyone else never
 // renders this, and the page they see is unchanged.
 export default function EditBar({ username }: { username: string }) {
-  const { editing, dirty, draft, markSaved, lastBlockSavedAt, blockSaving, uiLang } = useLang()
+  const { editing, dirty, draft, markSaved, lastBlockSavedAt, blockSaving, uiLang, uiT } = useLang()
   const [state, setState] = useState<'idle' | 'saving' | 'error'>('idle')
   const [error, setError] = useState<string | null>(null)
   const [justSaved, setJustSaved] = useState(false)
   const [seenSavedAt, setSeenSavedAt] = useState(lastBlockSavedAt)
+  const [translateOpen, setTranslateOpen] = useState(false)
   const router = useRouter()
 
   // Edits only live in the browser until Save actually confirms — closing the
@@ -85,6 +87,16 @@ export default function EditBar({ username }: { username: string }) {
           Preview
         </a>
 
+        {/* Owner-only, so its label follows `uiLang` via uiT, not the content
+            language toggle — see "App language vs. content language". */}
+        <button
+          type="button"
+          onClick={() => setTranslateOpen(true)}
+          className="text-xs text-dark-300 hover:text-dark-50 transition"
+        >
+          {uiT.translate.open}
+        </button>
+
         <button
           type="button"
           onClick={onSave}
@@ -132,6 +144,8 @@ export default function EditBar({ username }: { username: string }) {
 
         {error && <p className="w-full text-xs text-red-400">{error}</p>}
       </div>
+
+      <TranslatePanel open={translateOpen} onClose={() => setTranslateOpen(false)} />
     </div>
   )
 }

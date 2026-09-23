@@ -51,6 +51,38 @@ export const translations = {
       close: 'Close for now',
       dontShowAgain: "Don't show this again",
     },
+    // The AI translation panel. Owner-only tooling — a visitor never sees any
+    // of this — so it's read through `uiT` (app language), not `t` (content
+    // language). See "App language vs. content language" in CLAUDE.md.
+    translate: {
+      open: 'Translate',
+      title: 'Translate your portfolio',
+      intro: 'Fill one language from the other with an AI translation. Formatting, links and photos stay exactly as they are.',
+      directionLabel: 'Direction',
+      checking: 'Checking what needs translating…',
+      nothing: 'Everything is already translated. Nothing to do.',
+      toFill: (n: number) => (n === 1 ? '1 empty field to fill' : `${n} empty fields to fill`),
+      outOfDate: (n: number) =>
+        n === 1 ? '1 field is out of date' : `${n} fields are out of date`,
+      outOfDateHint: 'You edited the source after these were translated.',
+      includeStale: 'Also update the out-of-date ones',
+      start: 'Translate',
+      running: 'Translating…',
+      progress: (done: number, total: number) => `${done} of ${total} fields`,
+      copiedAsIs: (n: number) =>
+        n === 1 ? '1 field was copied as-is (just numbers)' : `${n} fields were copied as-is (just numbers)`,
+      done: 'Done',
+      doneReview: 'Have a read before you share it — an AI translation is a first draft, not a final one.',
+      someFailed: (n: number) =>
+        n === 1 ? "1 field couldn't be translated:" : `${n} fields couldn't be translated:`,
+      retry: 'Try the rest again',
+      tryAgain: 'Try again',
+      stalled: "Those fields didn't go through. You can try again, or edit them by hand.",
+      close: 'Close',
+      cancel: 'Cancel',
+      stop: 'Stop',
+      stopped: 'Stopped. What was already translated is saved.',
+    },
     hero: {
       greeting: "Hi, I'm",
       name: 'Conrado Figari Vechio',
@@ -365,6 +397,35 @@ export const translations = {
       skip: 'Saltear tour',
       close: 'Cerrar por ahora',
       dontShowAgain: 'No volver a mostrar esto',
+    },
+    translate: {
+      open: 'Traducir',
+      title: 'Traducí tu portfolio',
+      intro: 'Completá un idioma desde el otro con una traducción por IA. El formato, los links y las fotos quedan exactamente como están.',
+      directionLabel: 'Dirección',
+      checking: 'Viendo qué falta traducir…',
+      nothing: 'Ya está todo traducido. No hay nada que hacer.',
+      toFill: (n: number) => (n === 1 ? '1 campo vacío para completar' : `${n} campos vacíos para completar`),
+      outOfDate: (n: number) =>
+        n === 1 ? '1 campo quedó desactualizado' : `${n} campos quedaron desactualizados`,
+      outOfDateHint: 'Editaste el original después de traducirlos.',
+      includeStale: 'Actualizar también los desactualizados',
+      start: 'Traducir',
+      running: 'Traduciendo…',
+      progress: (done: number, total: number) => `${done} de ${total} campos`,
+      copiedAsIs: (n: number) =>
+        n === 1 ? '1 campo se copió tal cual (solo números)' : `${n} campos se copiaron tal cual (solo números)`,
+      done: 'Listo',
+      doneReview: 'Dale una leída antes de compartirlo — una traducción por IA es un primer borrador, no una versión final.',
+      someFailed: (n: number) =>
+        n === 1 ? 'No se pudo traducir 1 campo:' : `No se pudieron traducir ${n} campos:`,
+      retry: 'Reintentar el resto',
+      tryAgain: 'Reintentar',
+      stalled: 'Esos campos no pasaron. Podés reintentar, o escribirlos a mano.',
+      close: 'Cerrar',
+      cancel: 'Cancelar',
+      stop: 'Parar',
+      stopped: 'Parado. Lo que ya se tradujo quedó guardado.',
     },
     hero: {
       greeting: 'Hola, soy',
