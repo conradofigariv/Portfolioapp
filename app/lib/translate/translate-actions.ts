@@ -6,7 +6,7 @@ import { renderBlockHtml, sanitizeDoc } from '../editor/render-html'
 import type { Lang } from '../portfolio'
 import { planTranslation, plannedFields, type TranslatableBlock } from './plan'
 import { translateBatch, type FieldFailure, type Translator } from './translate-batch'
-import { createAnthropicTranslator } from './anthropic-translator'
+import { createGeminiTranslator } from './gemini-translator'
 
 /**
  * Step 4: one chunk of a translation run.
@@ -151,7 +151,7 @@ export async function translateChunk(options: {
     }
 
     const batch = queue.slice(0, limit)
-    const translator: Translator = createAnthropicTranslator()
+    const translator: Translator = createGeminiTranslator()
     const result = await translateBatch(batch, from, to, translator)
 
     const failures: FieldFailure[] = [...result.failed]
