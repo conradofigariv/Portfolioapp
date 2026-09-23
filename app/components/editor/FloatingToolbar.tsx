@@ -22,6 +22,16 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigat
 const modKey = isMac ? '⌘' : 'Ctrl'
 
 /**
+ * Group separator. Hidden below `sm` because the toolbar wraps there (see the
+ * className on the toolbar itself) — a 1px rule is the one child that can land
+ * alone at the end of a wrapped row, reading as a stray mark rather than a
+ * divider between anything. The wrap itself already separates the groups.
+ */
+function Divider() {
+  return <div className="hidden sm:block w-px h-5 bg-dark-600 mx-0.5" />
+}
+
+/**
  * Anchors to the caret (empty selection) or the selection's bounding rect,
  * via ProseMirror's own coordsAtPos rather than the DOM Selection API — that
  * keeps this correct even for selections made with the keyboard, which don't
@@ -238,49 +248,64 @@ export default function FloatingToolbar({ editor }: { editor: Editor | null }) {
           exit="exit"
           role="toolbar"
           aria-label="Text formatting"
-          className="flex items-center gap-1 rounded-lg border border-dark-600 bg-dark-800/95 backdrop-blur px-1.5 py-1 shadow-xl"
+          // `max-w` + `flex-wrap` is the actual fix for the toolbar running off
+          // the side of a phone: at ~548px of controls it is simply wider than
+          // any phone, and `shift()` cannot pull something wider than the
+          // viewport back on screen — it also forced horizontal scroll on the
+          // whole page. Capped to the viewport minus the 16px of padding the
+          // offset/shift middleware already reserves, and allowed to become a
+          // second row rather than being clipped. Desktop is untouched: there
+          // the controls fit on one line and nothing wraps.
+          className="flex flex-wrap items-center justify-center gap-1 rounded-lg border border-dark-600 bg-dark-800/95 backdrop-blur px-1.5 py-1 shadow-xl max-w-[calc(100vw-16px)]"
         >
-          <ToolbarButton
-            label="Bold"
-            shortcut={`${modKey}B`}
-            active={editor.isActive('bold')}
-            onToggle={() => editor.chain().focus().toggleBold().run()}
-          >
-            <span className="font-bold">B</span>
-          </ToolbarButton>
-          <ToolbarButton
-            label="Italic"
-            shortcut={`${modKey}I`}
-            active={editor.isActive('italic')}
-            onToggle={() => editor.chain().focus().toggleItalic().run()}
-          >
-            <span className="italic">I</span>
-          </ToolbarButton>
-          <ToolbarButton
-            label="Underline"
-            shortcut={`${modKey}U`}
-            active={editor.isActive('underline')}
-            onToggle={() => editor.chain().focus().toggleUnderline().run()}
-          >
-            <span className="underline">U</span>
-          </ToolbarButton>
-          <ToolbarButton
-            label="Strikethrough"
-            shortcut={`Shift+${modKey}X`}
-            active={editor.isActive('strike')}
-            onToggle={() => editor.chain().focus().toggleStrike().run()}
-          >
-            <span className="line-through">S</span>
-          </ToolbarButton>
-          <div className="w-px h-5 bg-dark-600 mx-0.5" />
+          {/* Every direct child is a whole group, so a wrap can only ever
+              happen *between* groups — never splitting the four alignment
+              buttons or the colour/highlight/link trio across two rows. */}
+          <div className="flex items-center gap-1">
+            <ToolbarButton
+              label="Bold"
+              shortcut={`${modKey}B`}
+              active={editor.isActive('bold')}
+              onToggle={() => editor.chain().focus().toggleBold().run()}
+            >
+              <span className="font-bold">B</span>
+            </ToolbarButton>
+            <ToolbarButton
+              label="Italic"
+              shortcut={`${modKey}I`}
+              active={editor.isActive('italic')}
+              onToggle={() => editor.chain().focus().toggleItalic().run()}
+            >
+              <span className="italic">I</span>
+            </ToolbarButton>
+            <ToolbarButton
+              label="Underline"
+              shortcut={`${modKey}U`}
+              active={editor.isActive('underline')}
+              onToggle={() => editor.chain().focus().toggleUnderline().run()}
+            >
+              <span className="underline">U</span>
+            </ToolbarButton>
+            <ToolbarButton
+              label="Strikethrough"
+              shortcut={`Shift+${modKey}X`}
+              active={editor.isActive('strike')}
+              onToggle={() => editor.chain().focus().toggleStrike().run()}
+            >
+              <span className="line-through">S</span>
+            </ToolbarButton>
+          </div>
+          <Divider />
           <FontFamilyControl editor={editor} />
-          <div className="w-px h-5 bg-dark-600 mx-0.5" />
+          <Divider />
           <FontSizeControl editor={editor} />
-          <div className="w-px h-5 bg-dark-600 mx-0.5" />
-          <ColorSwatches editor={editor} />
-          <HighlightButton editor={editor} />
-          <LinkPopover editor={editor} open={linkOpen} onOpenChange={setLinkOpen} />
-          <div className="w-px h-5 bg-dark-600 mx-0.5" />
+          <Divider />
+          <div className="flex items-center gap-1">
+            <ColorSwatches editor={editor} />
+            <HighlightButton editor={editor} />
+            <LinkPopover editor={editor} open={linkOpen} onOpenChange={setLinkOpen} />
+          </div>
+          <Divider />
           <AlignmentGroup editor={editor} />
         </motion.div>
       )}
