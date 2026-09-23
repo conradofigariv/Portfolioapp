@@ -23,6 +23,18 @@ export type TranslationRequest = {
   fields: { id: string; texts: string[] }[]
 }
 
+/**
+ * How many strings each id must come back with — the same contract rule 1 of
+ * the prompt states in words, in a form a provider's structured-output schema
+ * can enforce outright.
+ *
+ * Provider-agnostic on purpose: this says *what* the shape is, and each
+ * translator translates it into whatever its own API calls a response schema.
+ * The validation in `translate-batch.ts` stays either way — a schema is an
+ * extra lock, not a reason to trust the answer unchecked.
+ */
+export type TranslationShape = { id: string; count: number }[]
+
 const LANGUAGE_NAMES: Record<Lang, string> = {
   es: 'Spanish',
   en: 'English',
@@ -62,6 +74,7 @@ Rules:
 export function buildTranslationPrompt(request: TranslationRequest): {
   system: string
   user: string
+  shape: TranslationShape
 } {
   const payload: Record<string, string[]> = {}
   for (const field of request.fields) payload[field.id] = field.texts
@@ -73,6 +86,7 @@ export function buildTranslationPrompt(request: TranslationRequest): {
       '',
       JSON.stringify(payload),
     ].join('\n'),
+    shape: request.fields.map((field) => ({ id: field.id, count: field.texts.length })),
   }
 }
 

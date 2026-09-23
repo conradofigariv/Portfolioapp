@@ -6,6 +6,7 @@ import {
   buildTranslationPrompt,
   parseTranslationResponse,
   type TranslationRequest,
+  type TranslationShape,
 } from './prompt'
 
 /**
@@ -23,8 +24,19 @@ import {
  * see plan.ts's "take the next N from a freshly recomputed plan".
  */
 
-/** Given the built prompt, return the model's raw text answer. */
-export type Translator = (prompt: { system: string; user: string }) => Promise<string>
+/**
+ * Given the built prompt, return the model's raw text answer.
+ *
+ * `shape` is the per-id fragment count, for a provider that can enforce it as
+ * a structured-output schema. A translator is free to ignore it — the strict
+ * per-field validation below runs either way, because a schema is an extra
+ * lock on the answer's shape, not a reason to trust its contents unchecked.
+ */
+export type Translator = (prompt: {
+  system: string
+  user: string
+  shape: TranslationShape
+}) => Promise<string>
 
 /** A finished field: exactly what step 4 hands to `upsertBlock`. */
 export type TranslatedField = {
