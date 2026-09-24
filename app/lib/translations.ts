@@ -86,12 +86,26 @@ export const translations = {
           ? `+ 1 that already has content in ${target} — you’ll review it before anything changes`
           : `+ ${n} that already have content in ${target} — you’ll review them before anything changes`,
       reviewTitle: 'Review before applying',
-      reviewIntro: (target: string): string => `These already have content in ${target}. Nothing changes until you apply.`,
+      reviewIntro: (target: string): string =>
+        `These already have content in ${target}, so nothing changes until you apply. Tick the fields you want to update and pick what to do with each list — the preview under it shows how it will look.`,
+      changedIn: (source: string): string => `Edited in ${source} after it was translated`,
+      legendAdded: 'added',
+      legendRemoved: 'removed',
+      legendChanged: 'updated',
+      copyTag: 'copy',
+      choiceHelp: (choice: string, source: string): string =>
+        choice === 'sync'
+          ? `Adds what’s new in ${source} and updates what you edited there. Deletes nothing.`
+          : choice === 'replace'
+            ? `This list becomes the translation of the ${source} one. What’s there now is removed.`
+            : choice === 'dedupe'
+              ? 'Removes the translated copies and keeps only what you wrote.'
+              : 'Nothing changes in this list.',
       apply: (n: number): string => (n === 0 ? 'Apply' : n === 1 ? 'Apply 1 change' : `Apply ${n} changes`),
       skip: 'Skip',
       applying: 'Applying',
       noTranslation: 'Couldn’t translate this one',
-      copiesHint: 'Has translated copies next to your own items.',
+      copiesHint: 'Has translated copies next to your own items — marked “copy”.',
       removed: (n: number): string => (n === 1 ? '1 item removed' : `${n} items removed`),
       kinds: {
         narrative: 'Lines',
@@ -462,12 +476,26 @@ export const translations = {
           ? `+ 1 que ya tiene contenido en ${target} — lo vas a revisar antes de que cambie nada`
           : `+ ${n} que ya tienen contenido en ${target} — los vas a revisar antes de que cambie nada`,
       reviewTitle: 'Revisá antes de aplicar',
-      reviewIntro: (target: string): string => `Esto ya tiene contenido en ${target}. No cambia nada hasta que apliques.`,
+      reviewIntro: (target: string): string =>
+        `Esto ya tiene contenido en ${target}, así que no cambia nada hasta que apliques. Tildá los campos que quieras actualizar y elegí qué hacer con cada lista — la vista previa de abajo muestra cómo va a quedar.`,
+      changedIn: (source: string): string => `Lo editaste en ${source} después de traducirlo`,
+      legendAdded: 'se agrega',
+      legendRemoved: 'se quita',
+      legendChanged: 'se actualiza',
+      copyTag: 'copia',
+      choiceHelp: (choice: string, source: string): string =>
+        choice === 'sync'
+          ? `Agrega lo nuevo del ${source} y actualiza lo que editaste. No borra nada.`
+          : choice === 'replace'
+            ? `Esta lista pasa a ser la traducción de la del ${source}. Se quita lo que hay ahora.`
+            : choice === 'dedupe'
+              ? 'Quita las copias traducidas y deja solo lo que escribiste vos.'
+              : 'Esta lista no cambia.',
       apply: (n: number): string => (n === 0 ? 'Aplicar' : n === 1 ? 'Aplicar 1 cambio' : `Aplicar ${n} cambios`),
       skip: 'Omitir',
       applying: 'Aplicando',
       noTranslation: 'No se pudo traducir este',
-      copiesHint: 'Tiene copias traducidas junto a tus ítems.',
+      copiesHint: 'Tiene copias traducidas junto a tus ítems — marcadas como «copia».',
       removed: (n: number): string => (n === 1 ? 'Se quitó 1 ítem' : `Se quitaron ${n} ítems`),
       kinds: {
         narrative: 'Líneas',

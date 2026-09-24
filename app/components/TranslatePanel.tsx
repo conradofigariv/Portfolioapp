@@ -489,6 +489,7 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
                         <ReviewStep
                           review={review}
                           docs={docs}
+                          source={c.langName[from]}
                           target={c.langName[to]}
                           accepted={accepted}
                           onToggle={(key) =>
@@ -613,7 +614,14 @@ function canApply(list: ReviewList, choice: Choice, docs: Record<string, Doc>): 
   return keysFor(list, choice).every((key) => docs[key])
 }
 
-type Row = { key: string; text: string; state: 'kept' | 'removed' | 'added' | 'changed'; before?: string }
+type Row = {
+  key: string
+  text: string
+  state: 'kept' | 'removed' | 'added' | 'changed'
+  before?: string
+  /** A target item that came from an earlier translation, in a list that also has the owner's own. */
+  copy?: boolean
+}
 
 /**
  * What the list would look like under `choice`, row by row — the animated
@@ -628,8 +636,11 @@ function resultRows(list: ReviewList, choice: Choice, docs: Record<string, Doc>)
       .filter(Boolean)
       .join(' — ')
   const sourceById = new Map(list.source.map((item) => [item.itemId, item]))
+  // Only worth pointing out when the list mixes both — in an aligned list
+  // every item is a "copy", and the tag would just be noise.
+  const mixed = list.choices.includes('dedupe')
   const target = (state: Row['state'] = 'kept') =>
-    list.target.map((item) => ({ key: `t-${item.itemId}`, text: item.text, state }))
+    list.target.map((item) => ({ key: `t-${item.itemId}`, text: item.text, state, copy: mixed && item.shared }))
 
   if (choice === 'keep') return target()
   if (choice === 'replace') {
@@ -643,6 +654,7 @@ function resultRows(list: ReviewList, choice: Choice, docs: Record<string, Doc>)
       key: `t-${item.itemId}`,
       text: item.text,
       state: item.shared ? ('removed' as const) : ('kept' as const),
+      copy: item.shared,
     }))
   }
   // sync
@@ -662,6 +674,7 @@ function resultRows(list: ReviewList, choice: Choice, docs: Record<string, Doc>)
 function ReviewStep({
   review,
   docs,
+  source,
   target,
   accepted,
   onToggle,
@@ -670,6 +683,7 @@ function ReviewStep({
 }: {
   review: ReviewView
   docs: Record<string, Doc>
+  source: string
   target: string
   accepted: Set<string>
   onToggle: (blockKey: string) => void
@@ -686,6 +700,20 @@ function ReviewStep({
       <div>
         <p className="text-base font-medium text-dark-50">{c.reviewTitle}</p>
         <p className="mt-1 text-xs text-dark-500 leading-relaxed">{c.reviewIntro(target)}</p>
+        {review.lists.length > 0 && (
+          // The same three marks the list previews use, spelled out once.
+          <p className="mt-2.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-dark-500">
+            <span>
+              <span className="text-[#d8ff3e]">+</span> {c.legendAdded}
+            </span>
+            <span>
+              <span className="text-red-400/80">−</span> {c.legendRemoved}
+            </span>
+            <span>
+              <span className="text-[#d8ff3e]">~</span> {c.legendChanged}
+            </span>
+          </p>
+        )}
       </div>
 
       <div className="space-y-2.5">
@@ -711,8 +739,10 @@ function ReviewStep({
                   className="mt-0.5 accent-[#d8ff3e]"
                 />
                 <div className="min-w-0 flex-1 space-y-1">
-                  <p className="text-[11px] uppercase tracking-wider text-dark-500">
-                    {c.sections[field.section] ?? field.section}
+                  <p className="text-[11px] text-dark-500">
+                    <span className="uppercase tracking-wider">{c.sections[field.section] ?? field.section}</span>
+                    <span className="text-dark-600"> · </span>
+                    {c.changedIn(source)}
                   </p>
                   <motion.p
                     animate={{ opacity: on ? 0.45 : 1 }}
@@ -737,7 +767,13 @@ function ReviewStep({
             animate={{ opacity: 1, y: 0 }}
             transition={stagger()}
           >
-            <ListCard list={list} docs={docs} choice={choices[list.prefix] ?? 'keep'} onChoose={onChoose} />
+            <ListCard
+              list={list}
+              docs={docs}
+              source={source}
+              choice={choices[list.prefix] ?? 'keep'}
+              onChoose={onChoose}
+            />
           </motion.div>
         ))}
       </div>
@@ -748,11 +784,13 @@ function ReviewStep({
 function ListCard({
   list,
   docs,
+  source,
   choice,
   onChoose,
 }: {
   list: ReviewList
   docs: Record<string, Doc>
+  source: string
   choice: Choice
   onChoose: (prefix: string, choice: Choice) => void
 }) {
@@ -803,6 +841,22 @@ function ListCard({
         })}
       </div>
 
+      {/* What the selected choice does, in words — the preview below shows
+          the result, this says the rule. Reported as "lindo pero no muy claro
+          cómo funciona" with only the preview to go on. */}
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.p
+          key={choice}
+          initial={{ opacity: 0, y: 3 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -3 }}
+          transition={{ duration: 0.15 }}
+          className="-mt-1 text-[11px] text-dark-400 leading-relaxed"
+        >
+          {c.choiceHelp(choice, source)}
+        </motion.p>
+      </AnimatePresence>
+
       <ul className="space-y-1">
         <AnimatePresence initial={false}>
           {rows.map((row) => (
@@ -840,6 +894,11 @@ function ListCard({
                           : 'text-dark-50'
                     }`}
                   >
+                    {row.copy && (
+                      <span className="mr-1.5 inline-block align-[1px] rounded border border-amber-400/30 px-1 text-[9px] uppercase tracking-wider text-amber-200/80 no-underline">
+                        {c.copyTag}
+                      </span>
+                    )}
                     {row.text}
                   </motion.p>
                 </div>

@@ -10,6 +10,36 @@
   body {
     @apply bg-dark-900 text-dark-50;
   }
+
+  /* One scrollbar for the whole app — the page itself and every scrollable
+     panel inside it (the translation review, the photo gallery, the toolbar's
+     font lists). Nothing styled them before, so each browser drew its own
+     default: a light, classic scrollbar inside the dark translation panel,
+     reported as not matching the rest of the app. `scrollbar-color` is
+     inherited, so setting it once on the root covers every descendant;
+     `scrollbar-width` isn't, hence the universal selector. The -webkit rules
+     are only for Safari — Chromium ignores them once the standard properties
+     above are set. Colours are the dark-600 thumb on a transparent track. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #454550 transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #454550;
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: #6b6b73;
+  }
 }
 
 @layer components {
