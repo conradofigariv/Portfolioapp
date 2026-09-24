@@ -63,8 +63,15 @@ export async function runTranslation(options: {
   onProgress: (translated: number, total: number) => void
   /** Every successful chunk, as it lands — for the live feed of what changed. */
   onChunk?: (result: ChunkOk) => void
+  /**
+   * Also skip fields that *succeeded* — for a review run, where nothing is
+   * written, so a translated field never leaves the plan on its own and would
+   * otherwise be picked again by the next chunk forever.
+   */
+  skipSucceeded?: boolean
 }): Promise<RunOutcome> {
-  const { chunk, limit, shouldStop, onProgress, onChunk } = options
+  const { chunk, limit, shouldStop, onProgress, onChunk, skipSucceeded = false } = options
+  const succeeded = new Set<string>()
   let translated = 0
   // Keyed by block_key so a field can never be listed twice.
   const failed = new Map<string, FieldFailure>()
@@ -74,10 +81,11 @@ export async function runTranslation(options: {
   for (;;) {
     if (shouldStop()) return { status: 'stopped', translated, failures: failures() }
 
-    const result = await chunk(limit, [...failed.keys()])
+    const result = await chunk(limit, [...failed.keys(), ...succeeded])
     if (!result.ok) return { status: 'error', translated, error: result.error, failures: failures() }
 
     translated += result.translated
+    if (skipSucceeded) for (const item of result.written) succeeded.add(item.blockKey)
     onChunk?.(result)
     for (const failure of result.failures) failed.set(failure.blockKey, failure)
     // `remaining` is recomputed from a fresh plan each chunk, so the total
