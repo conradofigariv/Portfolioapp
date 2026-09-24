@@ -38,26 +38,52 @@ const MAX_OUTPUT_TOKENS = 16384
 // — that can push some models into degenerate repetition.
 const TEMPERATURE = 0.2
 
-// The SDK defaults outlast the serverless function this runs inside, so the
-// platform would kill the request first and the owner would see a generic
-// failure instead of one of the real messages below.
-const TIMEOUT_MS = 60_000
+/**
+ * Tried in order when the one before it is unavailable (see `fallsThrough`).
+ *
+ * Surfaced live: a real run hit `503 UNAVAILABLE` ("high demand") on the
+ * default model on every single attempt, across several clicks of "try again"
+ * — that model was simply out of capacity for a while, and nothing about
+ * retrying *it* was ever going to help. A different model in the same family
+ * almost never shares that outage, and for this task (short strings, same
+ * count back, schema-enforced) any of them does the job. Whatever
+ * `GEMINI_MODEL` names always goes first; the defaults follow, de-duplicated.
+ */
+const FALLBACK_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite']
+
+// Per request. Short enough that a stuck model still leaves time to try the
+// next one inside the page's `maxDuration` (60s, app/[username]/page.tsx) —
+// the SDK default would outlast the whole function, and the platform would
+// kill it before the owner ever saw one of the real messages below.
+const TIMEOUT_MS = 25_000
+
+// No new model is started once this much of the function's time is gone: one
+// more attempt that the platform cuts off halfway helps nobody, and the chunk
+// loop will simply try this batch's fields again on the owner's next run.
+const FALLBACK_BUDGET_MS = 30_000
 
 /**
  * The SDK's own default retry budget (5 attempts, exponential backoff up to a
  * 60s cap per step) is tuned for a long-running batch job, not a single call
- * inside a serverless function with its own wall-clock limit — worst case it
- * can burn most of a minute retrying before ever returning, which risks the
- * *platform* killing the function first and the owner seeing a raw timeout
- * instead of one of the messages below. Bounded explicitly and kept short:
- * one real retry is enough to smooth over a blip, and "still failing after
- * that" is a genuine, sustained problem (surfaced live: Gemini returning
- * `503 UNAVAILABLE` / "high demand" for several seconds straight) that this
- * app's own chunk-resume loop is the right layer to retry — a fresh click of
- * "Try again" is just as valid a retry as a deeper one buried in the SDK, and
- * it doesn't hold a function open while it waits.
+ * inside a serverless function with its own wall-clock limit. Kept to one real
+ * retry per model: a blip is smoothed over, and a model that is still failing
+ * after that is having a sustained outage, which the *next model* in
+ * `FALLBACK_MODELS` is far more likely to get past than a third attempt on the
+ * same one.
  */
-const RETRY_OPTIONS = { attempts: 3, initialDelay: 1, maxDelay: 4 }
+const RETRY_OPTIONS = { attempts: 2, initialDelay: 1, maxDelay: 4 }
+
+/**
+ * Worth trying another model: this one doesn't exist for this key (404), is
+ * rate-limited (429), is out of capacity or broken (5xx), or never answered
+ * at all (a timeout or a dropped connection). *Not* a 400/401/403 — a bad
+ * request or a bad key is the same bad key on every model, and falling through
+ * would only turn one clear message into three identical failures.
+ */
+function fallsThrough(err: unknown): boolean {
+  if (err instanceof ApiError) return err.status === 404 || err.status === 429 || err.status >= 500
+  return true
+}
 
 /**
  * The per-batch response schema: one property per field id, each an array of
@@ -129,33 +155,47 @@ export function createGeminiTranslator(): Translator {
     if (!apiKey) {
       throw new Error('Translation is not configured yet — GEMINI_API_KEY is not set.')
     }
-    const model = process.env.GEMINI_MODEL || DEFAULT_MODEL
+    const primary = process.env.GEMINI_MODEL || DEFAULT_MODEL
+    const models = [...new Set([primary, ...FALLBACK_MODELS])]
     const client = new GoogleGenAI({
       apiKey,
       httpOptions: { timeout: TIMEOUT_MS, retryOptions: RETRY_OPTIONS },
     })
 
+    const started = Date.now()
     let response
-    try {
-      response = await client.models.generateContent({
-        model,
-        contents: user,
-        config: {
-          systemInstruction: system,
-          temperature: TEMPERATURE,
-          maxOutputTokens: MAX_OUTPUT_TOKENS,
-          responseMimeType: 'application/json',
-          responseSchema: responseSchema(shape),
-          // `thinkingConfig` is deliberately left unset. Turning reasoning off
-          // is the obvious latency win, but a model that requires it rejects
-          // the request outright, and this app can't verify which is which
-          // against the real API from its own sandbox — so the model's own
-          // default is the only setting that is safe on every ID someone might
-          // put in GEMINI_MODEL.
-        },
-      })
-    } catch (err) {
-      throw new Error(describe(err, model))
+    // The *first* model's error is the one reported if every model fails: it's
+    // the one the owner configured (or the default they'd look up), so a 404
+    // there still names the right variable to fix even when a fallback 503'd.
+    let firstError: { err: unknown; model: string } | null = null
+    for (const model of models) {
+      if (firstError && Date.now() - started > FALLBACK_BUDGET_MS) break
+      try {
+        response = await client.models.generateContent({
+          model,
+          contents: user,
+          config: {
+            systemInstruction: system,
+            temperature: TEMPERATURE,
+            maxOutputTokens: MAX_OUTPUT_TOKENS,
+            responseMimeType: 'application/json',
+            responseSchema: responseSchema(shape),
+            // `thinkingConfig` is deliberately left unset. Turning reasoning off
+            // is the obvious latency win, but a model that requires it rejects
+            // the request outright, and this app can't verify which is which
+            // against the real API from its own sandbox — so the model's own
+            // default is the only setting that is safe on every ID someone might
+            // put in GEMINI_MODEL (or in the fallback list above).
+          },
+        })
+        break
+      } catch (err) {
+        firstError ??= { err, model }
+        if (!fallsThrough(err)) break
+      }
+    }
+    if (!response) {
+      throw new Error(firstError ? describe(firstError.err, firstError.model) : 'The translation call failed.')
     }
 
     // A blocked prompt comes back as an ordinary success with no candidate at

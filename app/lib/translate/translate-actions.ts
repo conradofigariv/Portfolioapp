@@ -34,6 +34,10 @@ const MAX_BLOCK_LENGTH = 2000
 const DEFAULT_CHUNK = 6
 const MAX_CHUNK = 12
 
+// A portfolio has on the order of a hundred fields; this only exists so a
+// caller can't make the server build an arbitrarily large Set.
+const MAX_SKIP = 1000
+
 type BlockRow = {
   block_key: string
   section: string
@@ -48,14 +52,19 @@ export type TranslateChunkResult =
       ok: true
       /** Nothing left to translate for this direction. */
       done: boolean
-      /** Fields written by this call. Zero with `done: false` means no progress — see below. */
+      /** Fields written by this call. */
       translated: number
       /** How many fields this call set out to do (its own chunk size). */
       attempted: number
-      /** Still planned after this call, for a progress bar. */
+      /**
+       * Planned fields this run hasn't attempted yet — excluding both this
+       * call's batch and everything in `skip`. `done` is exactly `remaining === 0`.
+       */
       remaining: number
       /** Per-field reasons, each carrying the real error rather than a generic one. */
       failures: FieldFailure[]
+      /** The model call itself failed — see `BatchResult.callError`. */
+      callError?: string
       counts: {
         missing: number
         stale: number
@@ -68,20 +77,29 @@ export type TranslateChunkResult =
   | { ok: false; error: string }
 
 /**
- * `translated === 0 && !done` is the signal the client loop must stop on.
+ * `skip` is the fields that already failed earlier in the *same run*.
  *
  * A failed field deliberately leaves its target row untouched, so it comes back
- * as `missing` on the very next plan — which is exactly what makes a transient
- * failure self-healing, and what would make a *permanent* one (a model that
- * keeps answering this particular field in the wrong shape) loop forever. The
- * action can't tell those apart from inside a single chunk; the caller can, by
- * noticing that a whole chunk moved nothing.
+ * as `missing` on the very next plan — right for the owner's *next* run (that's
+ * what makes a transient failure self-healing), wrong within one run. Because
+ * the plan is sorted, the fields that just failed are also the first ones the
+ * next chunk would pick again: without `skip`, one batch that keeps failing
+ * blocks every field sorted after it. Surfaced live exactly that way — the same
+ * 6 fields failing on every click, "0 of 124" translated, the other 118 never
+ * even attempted. With it, every chunk works on fields this run hasn't tried
+ * yet, so a run always reaches the end of the plan and then reports only what
+ * didn't make it.
+ *
+ * Nothing about `skip` is stored: it's the client's own memory of this run, so a
+ * new run (or a closed-and-reopened panel) starts with every field eligible
+ * again, and the ones that failed get their retry.
  */
 export async function translateChunk(options: {
   from: Lang
   to: Lang
   includeStale?: boolean
   limit?: number
+  skip?: string[]
 }): Promise<TranslateChunkResult> {
   // Same convention as every other write path in this app: always resolve,
   // never reject, and surface the *real* message — the caller's own catch can
@@ -102,6 +120,13 @@ export async function translateChunk(options: {
     const limit = Number.isFinite(requested)
       ? Math.min(MAX_CHUNK, Math.max(1, Math.trunc(requested as number)))
       : DEFAULT_CHUNK
+    // Same reasoning: whatever a caller sends. Non-strings are dropped rather
+    // than coerced; they can't name a block_key anyway.
+    const skip = new Set(
+      Array.isArray(options.skip)
+        ? options.skip.filter((key): key is string => typeof key === 'string').slice(0, MAX_SKIP)
+        : []
+    )
 
     const supabase = await createClient()
     const {
@@ -137,7 +162,7 @@ export async function translateChunk(options: {
       }))
 
     const plan = planTranslation(blocks, from, to)
-    const queue = plannedFields(plan, includeStale)
+    const queue = plannedFields(plan, includeStale).filter((field) => !skip.has(field.blockKey))
     const counts = {
       missing: plan.missing.length,
       stale: plan.stale.length,
@@ -195,7 +220,9 @@ export async function translateChunk(options: {
     // up after a revalidate. Done once per chunk rather than per field.
     if (written > 0) revalidatePath('/', 'layout')
 
-    const remaining = Math.max(0, queue.length - written)
+    // Everything in this batch has now been attempted, written or not — the
+    // failures go into the client's `skip` for the rest of the run.
+    const remaining = queue.length - batch.length
     return {
       ok: true,
       done: remaining === 0,
@@ -203,6 +230,7 @@ export async function translateChunk(options: {
       attempted: batch.length,
       remaining,
       failures,
+      ...(result.callError ? { callError: result.callError } : {}),
       counts,
     }
   } catch (err) {

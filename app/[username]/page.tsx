@@ -6,6 +6,13 @@ import { loadPortfolio } from '../lib/portfolio-db'
 import { adoptDeploymentMedia } from '../lib/deployment-owner'
 import { TOUR_STEPS } from '../lib/onboarding-tour'
 
+// Applies to every server action used on this page (per Next's own docs), and
+// is set for exactly one of them: `translateChunk`, which makes a blocking
+// model call — possibly falling back across several models — inside one
+// function. Some hosting plans default low enough that a slow model would be
+// killed mid-chunk with a generic error instead of one of its real messages.
+export const maxDuration = 60
+
 export async function generateMetadata({
   params,
 }: {

@@ -54,6 +54,15 @@ export type BatchResult = {
   failed: FieldFailure[]
   /** True when no model call was made (nothing in the batch needed one). */
   skippedModel: boolean
+  /**
+   * Set when the model call itself failed (threw, or answered with something
+   * that isn't a JSON object) rather than one field's entry being wrong. The
+   * caller's loop treats these differently: a bad entry is about *that field*,
+   * while a failed call says nothing about the fields at all — only that the
+   * service is struggling — so it's what a "stop asking for now" decision keys
+   * on. Every model-bound field is also in `failed`, with this same message.
+   */
+  callError?: string
 }
 
 const HAS_LETTER = /\p{L}/u
@@ -215,7 +224,7 @@ export async function translateBatch(
   } catch (err) {
     const error = message(err)
     for (const item of needsModel) failed.push({ blockKey: item.field.blockKey, error })
-    return { translated, failed, skippedModel: false }
+    return { translated, failed, skippedModel: false, callError: error }
   }
 
   for (const item of needsModel) {
