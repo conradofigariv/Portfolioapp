@@ -10,6 +10,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
+import type { JSONContent } from '@tiptap/core'
 import {
   AnimatePresence,
   MotionConfig,
@@ -20,26 +21,40 @@ import {
 } from 'framer-motion'
 import { useLang } from '../context/LanguageContext'
 import type { Lang } from '../lib/portfolio'
-import { previewTranslation, translateChunk } from '../lib/translate/translate-actions'
+import {
+  applyTranslationReview,
+  previewTranslation,
+  translateChunk,
+  translateReviewChunk,
+  type ReviewView,
+} from '../lib/translate/translate-actions'
 import { runTranslation } from '../lib/translate/run-translation'
+import type { ListChoice } from '../lib/translate/plan'
 import type { ChunkFailure, TranslatedItem } from '../lib/translate/translate-batch'
 
 /**
- * Step 5 of the AI translation feature: the owner's view of a run.
+ * The owner's view of a translation run (steps 5 and 6 of the feature).
  *
  * The whole loop lives here rather than on the server, which is the point of
  * the chunked design (see translate-actions.ts): each call is one model call
  * inside one serverless function, and the client is what decides whether to ask
- * for another. That gets progress, resumability and timeout safety out of one
- * mechanism — closing this panel mid-run doesn't roll anything back, and
+ * for another. Closing this panel mid-run doesn't roll anything back, and
  * reopening it simply plans again from whatever is already translated.
  *
- * Redesigned after "terminó y no sé qué hizo": the first version ended on a
- * progress bar and a count, which says nothing about *what* changed. Now every
- * chunk hands back readable before/after text (`written`), shown as a live feed
- * while it runs and, at the end, grouped by page section — each one expandable
- * down to the actual lines — plus a button that switches the page to the
- * language that was just filled.
+ * A run is **fill, then review**:
+ *
+ * 1. Fields with nothing in the target language (and lists whose target is
+ *    empty) are translated and written straight away, with a live feed.
+ * 2. Anything that already has content there — a field edited in the source
+ *    since it was translated, a list with its own items — is translated
+ *    *without writing*, and shown on a review screen: current text vs the
+ *    translation for fields, and for each list an animated preview of what it
+ *    would become under each choice (keep / update / replace / remove copies).
+ *    Only what the owner accepts is written, by `applyTranslationReview`.
+ *
+ * Added after a real run duplicated every hand-written Spanish list item: the
+ * owner asked for "a preview before applying", and picked this split — no
+ * review for what can't overwrite anything, a review for everything that can.
  */
 
 // Matches the action's own default. Small enough that one chunk is one quick
@@ -56,7 +71,12 @@ const EASE = [0.22, 1, 0.36, 1] as const
 type Phase =
   | 'checking'
   | 'ready'
+  /** Fill: writing empty fields. */
   | 'running'
+  /** Review: translating what already has content, without writing. */
+  | 'preparing'
+  | 'review'
+  | 'applying'
   | 'done'
   | 'partial'
   | 'stopped'
@@ -64,6 +84,10 @@ type Phase =
   | 'failed'
   /** The preview itself failed — nothing ran. */
   | 'error'
+
+type Choice = ListChoice | 'keep'
+type Doc = { json: JSONContent; result: string }
+type ReviewList = ReviewView['lists'][number]
 
 const noopSubscribe = () => () => {}
 
@@ -81,13 +105,21 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
   const to: Lang = from === 'es' ? 'en' : 'es'
 
   const [phase, setPhase] = useState<Phase>('checking')
-  const [counts, setCounts] = useState<{ missing: number; stale: number } | null>(null)
-  const [includeStale, setIncludeStale] = useState(false)
+  const [counts, setCounts] = useState<{ missing: number; review: number } | null>(null)
   const [done, setDone] = useState(0)
   const [total, setTotal] = useState(0)
   const [items, setItems] = useState<TranslatedItem[]>([])
+  /** Fill failures — the only ones "Retry N" can do anything about. */
   const [failures, setFailures] = useState<ChunkFailure[]>([])
+  /** Review/apply failures — shown, not retried from here. */
+  const [otherFailures, setOtherFailures] = useState<ChunkFailure[]>([])
+  const [removed, setRemoved] = useState(0)
   const [error, setError] = useState<string | null>(null)
+
+  const [review, setReview] = useState<ReviewView | null>(null)
+  const [docs, setDocs] = useState<Record<string, Doc>>({})
+  const [accepted, setAccepted] = useState<Set<string>>(new Set())
+  const [choices, setChoices] = useState<Record<string, Choice>>({})
 
   // Read only inside the loop and the Stop handler, never during render.
   const stopRef = useRef(false)
@@ -127,6 +159,8 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
       setPhase('checking')
       setError(null)
       setFailures([])
+      setOtherFailures([])
+      setRemoved(0)
       setCounts(null)
       setDone(0)
       setTotal(0)
@@ -149,7 +183,7 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
         setPhase('error')
         return
       }
-      setCounts({ missing: result.missing, stale: result.stale })
+      setCounts({ missing: result.missing, review: result.stale + result.lists })
       setPhase('ready')
     })
     return () => {
@@ -167,50 +201,154 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
-  /**
-   * `keep` carries the items of the run before (a retry of what failed), so
-   * the summary still describes everything this panel translated rather than
-   * only the last handful.
-   */
-  async function run(expected: number, keep: boolean) {
-    stopRef.current = false
-    setPhase('running')
-    setError(null)
-    setFailures([])
-    setDone(0)
-    setTotal(expected)
-    if (!keep) setItems([])
-
-    const outcome = await runTranslation({
-      chunk: (limit, skip) => translateChunk({ from, to, includeStale, limit, skip }),
-      limit: CHUNK,
-      shouldStop: () => stopRef.current,
-      onProgress: (translated, live) => {
-        setDone(translated)
-        setTotal(live)
-      },
-      onChunk: (result) => {
-        if (result.written.length > 0) setItems((prev) => [...prev, ...result.written])
-      },
-    })
-
-    if (outcome.status === 'error') setError(outcome.error)
-    if (outcome.status !== 'done') setFailures(outcome.failures)
-    setPhase(outcome.status === 'error' ? 'failed' : outcome.status)
-
-    // Whatever landed has to become visible: the action revalidates the cache
+  function finish(next: Phase) {
+    setPhase(next)
+    // Whatever landed has to become visible: the actions revalidate the cache
     // server-side, but this page still holds the pre-run blocks until it
     // refetches. Done once at the end rather than per chunk — a refresh
     // mid-run would remount every field underneath the owner.
     startRefresh(() => router.refresh())
   }
 
+  /**
+   * `keep` carries the items of the run before (a retry of what failed), so
+   * the summary still describes everything this panel translated. `fillOnly`
+   * is that retry: it's about the fields that failed to fill, not a second
+   * pass through review.
+   */
+  async function run(expected: number, keep: boolean, fillOnly: boolean) {
+    stopRef.current = false
+    setError(null)
+    setFailures([])
+    setDone(0)
+    setTotal(expected)
+    if (!keep) {
+      setItems([])
+      setOtherFailures([])
+      setRemoved(0)
+    }
+
+    let fillFailures: ChunkFailure[] = []
+    if (expected > 0) {
+      setPhase('running')
+      const outcome = await runTranslation({
+        chunk: (limit, skip) => translateChunk({ from, to, limit, skip }),
+        limit: CHUNK,
+        shouldStop: () => stopRef.current,
+        onProgress: (translated, live) => {
+          setDone(translated)
+          setTotal(live)
+        },
+        onChunk: (result) => {
+          if (result.written.length > 0) setItems((prev) => [...prev, ...result.written])
+        },
+      })
+      if (outcome.status !== 'done') fillFailures = outcome.failures
+      setFailures(fillFailures)
+      if (outcome.status === 'stopped') return finish('stopped')
+      if (outcome.status === 'error') {
+        setError(outcome.error)
+        return finish('failed')
+      }
+    }
+    const settled: Phase = fillFailures.length > 0 ? 'partial' : 'done'
+    if (fillOnly) return finish(settled)
+
+    // Review. Re-read rather than reusing the start screen's view: the page
+    // may have changed, and this is what the owner will be deciding on.
+    const preview = await previewTranslation({ from, to })
+    if (!preview.ok) {
+      setError(preview.error)
+      return finish('failed')
+    }
+    const view = preview.review
+    if (view.fields.length === 0 && view.lists.length === 0) return finish(settled)
+
+    const reviewKeys = new Set([
+      ...view.fields.map((f) => f.blockKey),
+      ...view.lists.flatMap((l) => l.source.flatMap((item) => item.keys)),
+    ])
+    setReview(view)
+    setDocs({})
+    setDone(0)
+    setTotal(reviewKeys.size)
+    setPhase('preparing')
+
+    const collected: Record<string, Doc> = {}
+    const outcome = await runTranslation({
+      chunk: (limit, skip) => translateReviewChunk({ from, to, limit, skip }),
+      limit: CHUNK,
+      shouldStop: () => stopRef.current,
+      skipSucceeded: true,
+      onProgress: (translated, live) => {
+        setDone(translated)
+        setTotal(live)
+      },
+      onChunk: (result) => {
+        for (const item of result.written) {
+          if (item.json) collected[item.blockKey] = { json: item.json, result: item.result }
+        }
+        setDocs({ ...collected })
+      },
+    })
+    if (outcome.status === 'stopped') return finish(settled === 'partial' ? 'partial' : 'stopped')
+    if (outcome.status === 'error') {
+      setError(outcome.error)
+      return finish('failed')
+    }
+
+    // Defaults: every stale field that got a translation is ticked (the owner
+    // edited the source, so updating is the likely intent — and nothing is
+    // written until Apply anyway). A list starts on "keep", except an aligned
+    // list whose only differences are *edited* items: there "update" can't
+    // add anything unexpected, it only refreshes lines that were translated
+    // before. Anything that adds, replaces or removes items waits for a click.
+    setAccepted(new Set(view.fields.filter((f) => collected[f.blockKey]).map((f) => f.blockKey)))
+    const initial: Record<string, Choice> = {}
+    for (const list of view.lists) {
+      const onlyEdits = list.source.every((item) => item.status !== 'new')
+      initial[list.prefix] =
+        list.choices.includes('sync') && onlyEdits && canApply(list, 'sync', collected) ? 'sync' : 'keep'
+    }
+    setChoices(initial)
+    setPhase('review')
+  }
+
+  async function apply() {
+    if (!review) return
+    setPhase('applying')
+    const lists = review.lists
+      .map((list) => ({ prefix: list.prefix, choice: choices[list.prefix] ?? 'keep' }))
+      .filter((entry): entry is { prefix: string; choice: ListChoice } => entry.choice !== 'keep')
+    const needed = new Set<string>([...accepted])
+    for (const { prefix, choice } of lists) {
+      const list = review.lists.find((l) => l.prefix === prefix)!
+      for (const key of keysFor(list, choice)) needed.add(key)
+    }
+    const result = await applyTranslationReview({
+      from,
+      to,
+      fields: [...accepted],
+      lists,
+      translations: [...needed].filter((key) => docs[key]).map((key) => ({ blockKey: key, json: docs[key].json })),
+    })
+    if (!result.ok) {
+      setError(result.error)
+      return finish('failed')
+    }
+    setItems((prev) => [...prev, ...result.written])
+    setRemoved((n) => n + result.removed)
+    setOtherFailures(result.failures)
+    finish(failures.length > 0 || result.failures.length > 0 ? 'partial' : 'done')
+  }
+
   const c = uiT.translate
-  const planned = counts ? counts.missing + (includeStale ? counts.stale : 0) : 0
-  const nothingToDo = phase === 'ready' && counts !== null && counts.missing === 0 && counts.stale === 0
-  const canStart = phase === 'ready' && planned > 0
+  const nothingToDo = phase === 'ready' && counts !== null && counts.missing === 0 && counts.review === 0
+  const canStart = phase === 'ready' && counts !== null && !nothingToDo
   const isSummary = phase === 'done' || phase === 'partial' || phase === 'stopped' || phase === 'failed'
   const bodyKey = isSummary ? 'summary' : phase
+  const changes =
+    accepted.size + Object.values(choices).filter((choice) => choice !== 'keep').length
 
   if (!mounted) return null
 
@@ -238,7 +376,7 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
               role="dialog"
               aria-modal="true"
               aria-label={c.title}
-              className="relative w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl border border-dark-700/80 bg-dark-900 shadow-2xl"
+              className="relative w-full max-w-md max-h-[88vh] overflow-y-auto rounded-2xl border border-dark-700/80 bg-dark-900 shadow-2xl"
             >
               <div className="flex items-center justify-between gap-4 px-5 pt-5">
                 <div className="flex items-center gap-2.5">
@@ -259,7 +397,7 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
                   onClick={onClose}
                   // Closing mid-run is safe and deliberately allowed: every chunk
                   // that already finished is written, and reopening re-plans from
-                  // there. Nothing to warn about.
+                  // there. Closing on the review screen writes nothing.
                   className="text-dark-400 hover:text-dark-50 transition p-1.5 -mr-1.5 rounded-lg hover:bg-dark-800"
                 >
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -312,30 +450,21 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
                         <div className="space-y-4">
                           <div>
                             <div className="text-5xl font-semibold tracking-tight text-dark-50 tabular-nums">
-                              <Counter value={planned} />
+                              <Counter value={counts.missing > 0 ? counts.missing : counts.review} />
                             </div>
-                            <p className="mt-1 text-sm text-dark-400">{c.toTranslate(c.langName[to])}</p>
+                            <p className="mt-1 text-sm text-dark-400">
+                              {counts.missing > 0 ? c.toTranslate(c.langName[to]) : c.toReview}
+                            </p>
                           </div>
-                          {counts.stale > 0 && (
-                            <label className="flex items-start gap-3 cursor-pointer rounded-xl border border-dark-700/70 px-3.5 py-3 hover:border-dark-600 transition">
-                              <input
-                                type="checkbox"
-                                checked={includeStale}
-                                onChange={(e) => setIncludeStale(e.target.checked)}
-                                className="mt-0.5 accent-[#d8ff3e]"
-                              />
-                              <span className="space-y-0.5">
-                                <span className="block text-sm text-dark-100">{c.includeStale}</span>
-                                <span className="block text-xs text-dark-500 leading-relaxed">
-                                  {c.outOfDate(counts.stale)}
-                                </span>
-                              </span>
-                            </label>
+                          {counts.missing > 0 && counts.review > 0 && (
+                            <p className="text-xs text-dark-500 leading-relaxed rounded-xl border border-dark-700/70 px-3.5 py-3">
+                              {c.reviewNote(counts.review, c.langName[to])}
+                            </p>
                           )}
                         </div>
                       )}
 
-                      {phase === 'running' && (
+                      {(phase === 'running' || phase === 'preparing') && (
                         <div className="space-y-5" aria-live="polite">
                           <div>
                             <div className="flex items-baseline gap-2">
@@ -347,12 +476,41 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
                               </span>
                             </div>
                             <p className="mt-1 text-sm text-dark-400">
-                              {c.running}
+                              {phase === 'running' ? c.running : c.preparing}
                               <Dots />
                             </p>
                           </div>
                           <ProgressBar value={total > 0 ? done / total : 0} />
-                          <LiveFeed items={items} />
+                          {phase === 'running' && <LiveFeed items={items} />}
+                        </div>
+                      )}
+
+                      {phase === 'review' && review && (
+                        <ReviewStep
+                          review={review}
+                          docs={docs}
+                          target={c.langName[to]}
+                          accepted={accepted}
+                          onToggle={(key) =>
+                            setAccepted((prev) => {
+                              const next = new Set(prev)
+                              if (next.has(key)) next.delete(key)
+                              else next.add(key)
+                              return next
+                            })
+                          }
+                          choices={choices}
+                          onChoose={(prefix, choice) => setChoices((prev) => ({ ...prev, [prefix]: choice }))}
+                        />
+                      )}
+
+                      {phase === 'applying' && (
+                        <div className="space-y-5" aria-live="polite">
+                          <p className="text-sm text-dark-400">
+                            {c.applying}
+                            <Dots />
+                          </p>
+                          <ProgressBar value={1} />
                         </div>
                       )}
 
@@ -361,9 +519,10 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
                           phase={phase}
                           items={items}
                           failures={failures}
+                          otherFailures={otherFailures}
+                          removed={removed}
                           error={error}
-                          doneThisRun={done}
-                          onRetryFailed={() => void run(failures.length, true)}
+                          onRetryFailed={() => void run(failures.length, true, true)}
                         />
                       )}
 
@@ -378,8 +537,10 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
                 </div>
               </AutoHeight>
 
-              <div className="flex items-center justify-end gap-2 px-5 pb-5 pt-1">
-                {phase === 'running' ? (
+              {/* Sticky: the review step can be taller than the panel, and its
+                  Apply button must stay reachable without scrolling to the end. */}
+              <div className="sticky bottom-0 z-10 flex items-center justify-end gap-2 px-5 pb-5 pt-3 bg-dark-900 shadow-[0_-12px_16px_-8px_rgba(0,0,0,0.6)]">
+                {phase === 'running' || phase === 'preparing' ? (
                   <FooterButton
                     onClick={() => {
                       // Only checked between chunks — a server action already
@@ -390,6 +551,17 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
                   >
                     {c.stop}
                   </FooterButton>
+                ) : phase === 'applying' ? null : phase === 'review' ? (
+                  <>
+                    {/* Skipping writes nothing from the review; what the fill
+                        part already wrote stays. */}
+                    <FooterButton onClick={() => finish(failures.length > 0 ? 'partial' : 'done')}>
+                      {c.skip}
+                    </FooterButton>
+                    <PrimaryButton disabled={changes === 0} onClick={() => void apply()}>
+                      {c.apply(changes)}
+                    </PrimaryButton>
+                  </>
                 ) : (
                   <>
                     <FooterButton onClick={onClose}>
@@ -401,7 +573,7 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
                       // what's left before starting.
                       <PrimaryButton onClick={() => setReloads((n) => n + 1)}>{c.tryAgain}</PrimaryButton>
                     )}
-                    {(phase === 'done' || phase === 'partial') && items.length > 0 && lang !== to && (
+                    {(phase === 'done' || phase === 'partial') && (items.length > 0 || removed > 0) && lang !== to && (
                       <PrimaryButton
                         disabled={refreshing}
                         onClick={() => {
@@ -412,7 +584,9 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
                         {refreshing ? c.updating : c.view(c.langName[to])}
                       </PrimaryButton>
                     )}
-                    {canStart && <PrimaryButton onClick={() => void run(planned, false)}>{c.start}</PrimaryButton>}
+                    {canStart && counts !== null && (
+                      <PrimaryButton onClick={() => void run(counts.missing, false, false)}>{c.start}</PrimaryButton>
+                    )}
                   </>
                 )}
               </div>
@@ -426,20 +600,275 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
 }
 
 /* ------------------------------------------------------------------------ */
+/* Review                                                                     */
+
+/** The source fields a list choice writes — mirrors the server's own rule. */
+function keysFor(list: ReviewList, choice: Choice): string[] {
+  if (choice === 'keep' || choice === 'dedupe') return []
+  return list.source.filter((item) => choice === 'replace' || item.status !== 'shared').flatMap((item) => item.keys)
+}
+
+/** Whether every translation a choice needs actually came back. */
+function canApply(list: ReviewList, choice: Choice, docs: Record<string, Doc>): boolean {
+  return keysFor(list, choice).every((key) => docs[key])
+}
+
+type Row = { key: string; text: string; state: 'kept' | 'removed' | 'added' | 'changed'; before?: string }
+
+/**
+ * What the list would look like under `choice`, row by row — the animated
+ * preview. Row keys are stable per item (`t-<id>` for what's in the target
+ * now, `s-<id>` for what a choice brings in), so switching choice animates
+ * each row from one state to the next instead of redrawing the list.
+ */
+function resultRows(list: ReviewList, choice: Choice, docs: Record<string, Doc>): Row[] {
+  const translated = (item: ReviewList['source'][number]) =>
+    item.keys
+      .map((key) => docs[key]?.result)
+      .filter(Boolean)
+      .join(' — ')
+  const sourceById = new Map(list.source.map((item) => [item.itemId, item]))
+  const target = (state: Row['state'] = 'kept') =>
+    list.target.map((item) => ({ key: `t-${item.itemId}`, text: item.text, state }))
+
+  if (choice === 'keep') return target()
+  if (choice === 'replace') {
+    return [
+      ...target('removed'),
+      ...list.source.map((item) => ({ key: `s-${item.itemId}`, text: translated(item), state: 'added' as const })),
+    ]
+  }
+  if (choice === 'dedupe') {
+    return list.target.map((item) => ({
+      key: `t-${item.itemId}`,
+      text: item.text,
+      state: item.shared ? ('removed' as const) : ('kept' as const),
+    }))
+  }
+  // sync
+  return [
+    ...list.target.map((item) => {
+      const source = sourceById.get(item.itemId)
+      return source?.status === 'changed'
+        ? { key: `t-${item.itemId}`, text: translated(source), state: 'changed' as const, before: item.text }
+        : { key: `t-${item.itemId}`, text: item.text, state: 'kept' as const }
+    }),
+    ...list.source
+      .filter((item) => item.status === 'new')
+      .map((item) => ({ key: `s-${item.itemId}`, text: translated(item), state: 'added' as const })),
+  ]
+}
+
+function ReviewStep({
+  review,
+  docs,
+  target,
+  accepted,
+  onToggle,
+  choices,
+  onChoose,
+}: {
+  review: ReviewView
+  docs: Record<string, Doc>
+  target: string
+  accepted: Set<string>
+  onToggle: (blockKey: string) => void
+  choices: Record<string, Choice>
+  onChoose: (prefix: string, choice: Choice) => void
+}) {
+  const { uiT } = useLang()
+  const c = uiT.translate
+  let index = 0
+  const stagger = () => ({ delay: 0.05 + index++ * 0.05, duration: 0.3, ease: EASE })
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-base font-medium text-dark-50">{c.reviewTitle}</p>
+        <p className="mt-1 text-xs text-dark-500 leading-relaxed">{c.reviewIntro(target)}</p>
+      </div>
+
+      <div className="space-y-2.5">
+        {review.fields.map((field) => {
+          const doc = docs[field.blockKey]
+          const on = accepted.has(field.blockKey)
+          return (
+            <motion.label
+              key={field.blockKey}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={stagger()}
+              className={`block rounded-xl border px-3.5 py-3 transition-colors ${
+                doc ? 'cursor-pointer' : 'opacity-60'
+              } ${on ? 'border-[#d8ff3e]/30 bg-[#d8ff3e]/[0.03]' : 'border-dark-700/70 hover:border-dark-600'}`}
+            >
+              <div className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={on}
+                  disabled={!doc}
+                  onChange={() => onToggle(field.blockKey)}
+                  className="mt-0.5 accent-[#d8ff3e]"
+                />
+                <div className="min-w-0 flex-1 space-y-1">
+                  <p className="text-[11px] uppercase tracking-wider text-dark-500">
+                    {c.sections[field.section] ?? field.section}
+                  </p>
+                  <motion.p
+                    animate={{ opacity: on ? 0.45 : 1 }}
+                    className={`text-xs text-dark-300 line-clamp-2 ${on ? 'line-through decoration-dark-500' : ''}`}
+                  >
+                    {field.current}
+                  </motion.p>
+                  <Collapse open={on && !!doc}>
+                    <p className="pt-0.5 text-sm text-dark-50 line-clamp-3">{doc?.result}</p>
+                  </Collapse>
+                  {!doc && <p className="text-[11px] text-amber-200/70">{c.noTranslation}</p>}
+                </div>
+              </div>
+            </motion.label>
+          )
+        })}
+
+        {review.lists.map((list) => (
+          <motion.div
+            key={list.prefix}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={stagger()}
+          >
+            <ListCard list={list} docs={docs} choice={choices[list.prefix] ?? 'keep'} onChoose={onChoose} />
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ListCard({
+  list,
+  docs,
+  choice,
+  onChoose,
+}: {
+  list: ReviewList
+  docs: Record<string, Doc>
+  choice: Choice
+  onChoose: (prefix: string, choice: Choice) => void
+}) {
+  const { uiT } = useLang()
+  const c = uiT.translate
+  const rows = resultRows(list, choice, docs)
+  const options: Choice[] = ['keep', ...list.choices]
+  const hasCopies = list.choices.includes('dedupe')
+  const title = [c.sections[list.section] ?? list.section, list.parentTitle].filter(Boolean).join(' · ')
+
+  return (
+    <div
+      className={`rounded-xl border px-3.5 py-3 space-y-3 transition-colors ${
+        choice === 'keep' ? 'border-dark-700/70' : 'border-[#d8ff3e]/30 bg-[#d8ff3e]/[0.03]'
+      }`}
+    >
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="text-sm text-dark-100 truncate">{title}</p>
+        <p className="shrink-0 text-[11px] uppercase tracking-wider text-dark-500">{c.kinds[list.kind] ?? list.kind}</p>
+      </div>
+      {hasCopies && <p className="text-[11px] text-amber-200/70 -mt-1.5">{c.copiesHint}</p>}
+
+      <div className="flex flex-wrap gap-1 rounded-full border border-dark-700 p-0.5 w-fit max-w-full">
+        {options.map((option) => {
+          const active = option === choice
+          const available = canApply(list, option, docs)
+          return (
+            <button
+              key={option}
+              type="button"
+              disabled={!available}
+              onClick={() => onChoose(list.prefix, option)}
+              aria-pressed={active}
+              className={`relative text-[11px] px-2.5 py-1 rounded-full transition-colors disabled:opacity-30 ${
+                active ? 'text-dark-900 font-semibold' : 'text-dark-400 hover:text-dark-100'
+              }`}
+            >
+              {active && (
+                <motion.span
+                  layoutId={`choice-${list.prefix}`}
+                  className="absolute inset-0 rounded-full bg-dark-50"
+                  transition={{ type: 'spring', stiffness: 500, damping: 38 }}
+                />
+              )}
+              <span className="relative">{c.choices[option]}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      <ul className="space-y-1">
+        <AnimatePresence initial={false}>
+          {rows.map((row) => (
+            <motion.li
+              key={row.key}
+              layout="position"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.25, ease: EASE }}
+              className="overflow-hidden"
+            >
+              <div className="flex items-start gap-2 py-0.5">
+                <span
+                  aria-hidden
+                  className={`w-3 shrink-0 text-center text-xs leading-5 ${
+                    row.state === 'added' || row.state === 'changed'
+                      ? 'text-[#d8ff3e]'
+                      : row.state === 'removed'
+                        ? 'text-red-400/80'
+                        : 'text-dark-600'
+                  }`}
+                >
+                  {row.state === 'added' ? '+' : row.state === 'removed' ? '−' : row.state === 'changed' ? '~' : '·'}
+                </span>
+                <div className="min-w-0">
+                  {row.before && <p className="text-[11px] text-dark-500 line-through line-clamp-1">{row.before}</p>}
+                  <motion.p
+                    animate={{ opacity: row.state === 'removed' ? 0.45 : 1 }}
+                    className={`text-xs leading-5 line-clamp-2 ${
+                      row.state === 'removed'
+                        ? 'text-dark-400 line-through decoration-red-400/50'
+                        : row.state === 'kept'
+                          ? 'text-dark-300'
+                          : 'text-dark-50'
+                    }`}
+                  >
+                    {row.text}
+                  </motion.p>
+                </div>
+              </div>
+            </motion.li>
+          ))}
+        </AnimatePresence>
+      </ul>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------------ */
 
 function Summary({
   phase,
   items,
   failures,
+  otherFailures,
+  removed,
   error,
-  doneThisRun,
   onRetryFailed,
 }: {
   phase: Phase
   items: TranslatedItem[]
   failures: ChunkFailure[]
+  otherFailures: ChunkFailure[]
+  removed: number
   error: string | null
-  doneThisRun: number
   onRetryFailed: () => void
 }) {
   const { uiT } = useLang()
@@ -448,10 +877,11 @@ function Summary({
   const [showFailed, setShowFailed] = useState(false)
 
   const groups = groupBySection(items)
+  const allFailures = [...failures, ...otherFailures]
   // The common case is one error for every failed field (the service was
   // overloaded) — said once above the list, not repeated on every line.
   const sharedError =
-    failures.length > 0 && failures.every((f) => f.error === failures[0].error) ? failures[0].error : null
+    allFailures.length > 0 && allFailures.every((f) => f.error === allFailures[0].error) ? allFailures[0].error : null
 
   return (
     <div className="space-y-5">
@@ -464,12 +894,13 @@ function Summary({
             </span>
             <span className="text-sm text-dark-400">{c.fieldsTranslated(items.length)}</span>
           </div>
+          {removed > 0 && <p className="mt-1.5 text-xs text-dark-400">{c.removed(removed)}</p>}
           {phase === 'failed' && (
             <p className="mt-2 text-sm text-dark-200 leading-relaxed">
               <span className="text-dark-50 font-medium">{c.failedTitle}.</span> {error}
             </p>
           )}
-          {phase === 'failed' && doneThisRun > 0 && <p className="mt-1 text-xs text-dark-500">{c.continueHint}</p>}
+          {phase === 'failed' && items.length > 0 && <p className="mt-1 text-xs text-dark-500">{c.continueHint}</p>}
           {phase === 'stopped' && <p className="mt-2 text-xs text-dark-400">{c.stopped}</p>}
           {(phase === 'done' || phase === 'partial') && (
             <p className="mt-2 text-xs text-dark-500 leading-relaxed">{c.review}</p>
@@ -516,7 +947,7 @@ function Summary({
         </ul>
       )}
 
-      {phase === 'partial' && failures.length > 0 && (
+      {(phase === 'partial' || phase === 'done') && allFailures.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 4 }}
           animate={{ opacity: 1, y: 0 }}
@@ -530,22 +961,24 @@ function Summary({
               aria-expanded={showFailed}
               className="flex items-center gap-2 text-sm text-amber-200/90 hover:text-amber-100 transition text-left"
             >
-              {c.didntGoThrough(failures.length)}
+              {c.didntGoThrough(allFailures.length)}
               <Chevron open={showFailed} />
             </button>
-            <button
-              type="button"
-              onClick={onRetryFailed}
-              className="shrink-0 text-xs font-medium text-dark-50 rounded-full border border-dark-600 px-3 py-1 hover:bg-dark-800 transition"
-            >
-              {c.retryFailed(failures.length)}
-            </button>
+            {failures.length > 0 && (
+              <button
+                type="button"
+                onClick={onRetryFailed}
+                className="shrink-0 text-xs font-medium text-dark-50 rounded-full border border-dark-600 px-3 py-1 hover:bg-dark-800 transition"
+              >
+                {c.retryFailed(failures.length)}
+              </button>
+            )}
           </div>
           <Collapse open={showFailed}>
             <div className="px-3.5 pb-3 space-y-2">
               {sharedError && <p className="text-[11px] text-amber-200/70">{sharedError}</p>}
               <ul className="space-y-1.5 max-h-48 overflow-y-auto">
-                {failures.map((f) => (
+                {allFailures.map((f) => (
                   <li key={f.blockKey} className="text-xs text-dark-300">
                     <span className="line-clamp-1">
                       <span className="text-dark-500">

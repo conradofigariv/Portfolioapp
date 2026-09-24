@@ -61,9 +61,6 @@ export const translations = {
       nothing: 'Everything is already translated.',
       langName: { en: 'English', es: 'Spanish' },
       toTranslate: (target: string) => `fields to translate into ${target}`,
-      outOfDate: (n: number) =>
-        n === 1 ? '1 field is out of date — you edited the original after it was translated' : `${n} fields are out of date — you edited the original after they were translated`,
-      includeStale: 'Update those too',
       start: 'Translate',
       running: 'Translating',
       of: 'of',
@@ -82,6 +79,33 @@ export const translations = {
       close: 'Close',
       cancel: 'Cancel',
       stop: 'Stop',
+      preparing: 'Preparing the preview',
+      toReview: 'to review before applying',
+      reviewNote: (n: number, target: string): string =>
+        n === 1
+          ? `+ 1 that already has content in ${target} — you’ll review it before anything changes`
+          : `+ ${n} that already have content in ${target} — you’ll review them before anything changes`,
+      reviewTitle: 'Review before applying',
+      reviewIntro: (target: string): string => `These already have content in ${target}. Nothing changes until you apply.`,
+      apply: (n: number): string => (n === 0 ? 'Apply' : n === 1 ? 'Apply 1 change' : `Apply ${n} changes`),
+      skip: 'Skip',
+      applying: 'Applying',
+      noTranslation: 'Couldn’t translate this one',
+      copiesHint: 'Has translated copies next to your own items.',
+      removed: (n: number): string => (n === 1 ? '1 item removed' : `${n} items removed`),
+      kinds: {
+        narrative: 'Lines',
+        tags: 'Tags',
+        skills: 'Skills',
+        availability: 'Availability',
+        certs: 'Certifications',
+      } as Record<string, string>,
+      choices: {
+        keep: 'Keep as is',
+        sync: 'Update',
+        replace: 'Replace',
+        dedupe: 'Remove copies',
+      } as Record<string, string>,
       sections: {
         hero: 'Intro',
         journey: 'Story',
@@ -413,9 +437,6 @@ export const translations = {
       nothing: 'Ya está todo traducido.',
       langName: { en: 'inglés', es: 'español' },
       toTranslate: (target: string) => `campos para traducir al ${target}`,
-      outOfDate: (n: number) =>
-        n === 1 ? '1 campo quedó desactualizado — editaste el original después de traducirlo' : `${n} campos quedaron desactualizados — editaste el original después de traducirlos`,
-      includeStale: 'Actualizarlos también',
       start: 'Traducir',
       running: 'Traduciendo',
       of: 'de',
@@ -434,6 +455,33 @@ export const translations = {
       close: 'Cerrar',
       cancel: 'Cancelar',
       stop: 'Parar',
+      preparing: 'Preparando la vista previa',
+      toReview: 'para revisar antes de aplicar',
+      reviewNote: (n: number, target: string): string =>
+        n === 1
+          ? `+ 1 que ya tiene contenido en ${target} — lo vas a revisar antes de que cambie nada`
+          : `+ ${n} que ya tienen contenido en ${target} — los vas a revisar antes de que cambie nada`,
+      reviewTitle: 'Revisá antes de aplicar',
+      reviewIntro: (target: string): string => `Esto ya tiene contenido en ${target}. No cambia nada hasta que apliques.`,
+      apply: (n: number): string => (n === 0 ? 'Aplicar' : n === 1 ? 'Aplicar 1 cambio' : `Aplicar ${n} cambios`),
+      skip: 'Omitir',
+      applying: 'Aplicando',
+      noTranslation: 'No se pudo traducir este',
+      copiesHint: 'Tiene copias traducidas junto a tus ítems.',
+      removed: (n: number): string => (n === 1 ? 'Se quitó 1 ítem' : `Se quitaron ${n} ítems`),
+      kinds: {
+        narrative: 'Líneas',
+        tags: 'Tags',
+        skills: 'Habilidades',
+        availability: 'Disponibilidad',
+        certs: 'Certificaciones',
+      } as Record<string, string>,
+      choices: {
+        keep: 'Dejar como está',
+        sync: 'Actualizar',
+        replace: 'Reemplazar',
+        dedupe: 'Quitar copias',
+      } as Record<string, string>,
       sections: {
         hero: 'Presentación',
         journey: 'Historia',

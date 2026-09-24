@@ -61,7 +61,14 @@ export type FieldPreview = {
   section: string
   source: string
 }
-export type TranslatedItem = FieldPreview & { result: string }
+export type TranslatedItem = FieldPreview & {
+  result: string
+  /**
+   * The translated document itself — only on a review chunk, where nothing is
+   * written yet and the client has to hand it back to `applyTranslationReview`.
+   */
+  json?: JSONContent
+}
 export type ChunkFailure = FieldFailure & Partial<FieldPreview>
 
 export type BatchResult = {
