@@ -414,7 +414,11 @@ export function planTranslation(
       : prefix.startsWith('skills.categories.')
         ? prefix.replace(/\.skills$/, '.category')
         : null
-    const parent = parentKey ? allSources.get(parentKey) : undefined
+    // The target language's own title when it has one — the review is read
+    // against the target page, where that's the title the owner sees.
+    const targetParent = parentKey ? targets.get(parentKey) : undefined
+    const parent =
+      targetParent && plainText(targetParent.json) ? targetParent : parentKey ? allSources.get(parentKey) : undefined
 
     return {
       prefix,
