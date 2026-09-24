@@ -1,4 +1,4 @@
-import type { FieldFailure } from './translate-batch'
+import type { ChunkFailure } from './translate-batch'
 import type { TranslateChunkResult } from './translate-actions'
 
 /**
@@ -23,6 +23,8 @@ import type { TranslateChunkResult } from './translate-actions'
  */
 
 export type ChunkFn = (limit: number, skip: string[]) => Promise<TranslateChunkResult>
+type ChunkOk = Extract<TranslateChunkResult, { ok: true }>
+type FieldFailure = ChunkFailure
 
 export type RunOutcome =
   /** Every planned field was written. */
@@ -59,8 +61,10 @@ export async function runTranslation(options: {
   shouldStop: () => boolean
   /** `total` is re-read from the server every chunk, so it self-corrects. */
   onProgress: (translated: number, total: number) => void
+  /** Every successful chunk, as it lands — for the live feed of what changed. */
+  onChunk?: (result: ChunkOk) => void
 }): Promise<RunOutcome> {
-  const { chunk, limit, shouldStop, onProgress } = options
+  const { chunk, limit, shouldStop, onProgress, onChunk } = options
   let translated = 0
   // Keyed by block_key so a field can never be listed twice.
   const failed = new Map<string, FieldFailure>()
@@ -74,6 +78,7 @@ export async function runTranslation(options: {
     if (!result.ok) return { status: 'error', translated, error: result.error, failures: failures() }
 
     translated += result.translated
+    onChunk?.(result)
     for (const failure of result.failures) failed.set(failure.blockKey, failure)
     // `remaining` is recomputed from a fresh plan each chunk, so the total
     // stays right even if the portfolio changed underneath mid-run, rather

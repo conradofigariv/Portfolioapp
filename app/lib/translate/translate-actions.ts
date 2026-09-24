@@ -2,10 +2,15 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '../supabase/server'
-import { renderBlockHtml, sanitizeDoc } from '../editor/render-html'
+import { plainTextFromDoc, renderBlockHtml, sanitizeDoc } from '../editor/render-html'
 import type { Lang } from '../portfolio'
 import { planTranslation, plannedFields, type TranslatableBlock } from './plan'
-import { translateBatch, type FieldFailure, type Translator } from './translate-batch'
+import {
+  translateBatch,
+  type ChunkFailure,
+  type TranslatedItem,
+  type Translator,
+} from './translate-batch'
 import { createGeminiTranslator } from './gemini-translator'
 
 /**
@@ -33,6 +38,14 @@ const MAX_BLOCK_LENGTH = 2000
 // fields, and they all come back on the next pass anyway.
 const DEFAULT_CHUNK = 6
 const MAX_CHUNK = 12
+
+// Previews travel to the browser once per field; a snippet is all the panel
+// shows, so there's no reason to ship a whole paragraph back.
+const PREVIEW_LENGTH = 160
+function snippet(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length > PREVIEW_LENGTH ? `${flat.slice(0, PREVIEW_LENGTH - 1).trimEnd()}…` : flat
+}
 
 // A portfolio has on the order of a hundred fields; this only exists so a
 // caller can't make the server build an arbitrarily large Set.
@@ -62,7 +75,14 @@ export type TranslateChunkResult =
        */
       remaining: number
       /** Per-field reasons, each carrying the real error rather than a generic one. */
-      failures: FieldFailure[]
+      failures: ChunkFailure[]
+      /**
+       * Every field this call wrote, as readable before/after text — what the
+       * panel shows live and in its end-of-run summary. Reported live as "it
+       * finished and I don't know what it did": a count alone says nothing
+       * about *which* text changed or what it changed to.
+       */
+      written: TranslatedItem[]
       /** The model call itself failed — see `BatchResult.callError`. */
       callError?: string
       counts: {
@@ -172,14 +192,20 @@ export async function translateChunk(options: {
     }
 
     if (queue.length === 0) {
-      return { ok: true, done: true, translated: 0, attempted: 0, remaining: 0, failures: [], counts }
+      return { ok: true, done: true, translated: 0, attempted: 0, remaining: 0, failures: [], written: [], counts }
     }
 
     const batch = queue.slice(0, limit)
     const translator: Translator = createGeminiTranslator()
     const result = await translateBatch(batch, from, to, translator)
 
-    const failures: FieldFailure[] = [...result.failed]
+    const byKey = new Map(batch.map((field) => [field.blockKey, field]))
+    const preview = (blockKey: string) => {
+      const field = byKey.get(blockKey)
+      return field ? { section: field.section, source: snippet(field.texts.join('')) } : {}
+    }
+    const failures: ChunkFailure[] = result.failed.map((f) => ({ ...f, ...preview(f.blockKey) }))
+    const items: TranslatedItem[] = []
     let written = 0
 
     // One upsert per field rather than a single array upsert: a batch write
@@ -212,8 +238,17 @@ export async function translateChunk(options: {
       // row always ends up newer than the source it was translated from — which
       // is precisely what makes the field read as current until the owner edits
       // the source again (see plan.ts on staleness).
-      if (error) failures.push({ blockKey: field.blockKey, error: error.message })
-      else written++
+      if (error) failures.push({ blockKey: field.blockKey, error: error.message, ...preview(field.blockKey) })
+      else {
+        written++
+        items.push({
+          blockKey: field.blockKey,
+          section: field.section,
+          source: snippet(byKey.get(field.blockKey)?.texts.join('') ?? ''),
+          // From the document actually stored, not the model's raw answer.
+          result: snippet(plainTextFromDoc(safeJson)),
+        })
+      }
     }
 
     // The public page renders from these rows, so the new language only shows
@@ -230,6 +265,7 @@ export async function translateChunk(options: {
       attempted: batch.length,
       remaining,
       failures,
+      written: items,
       ...(result.callError ? { callError: result.callError } : {}),
       counts,
     }
