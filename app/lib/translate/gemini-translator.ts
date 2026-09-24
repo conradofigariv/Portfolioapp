@@ -44,6 +44,22 @@ const TEMPERATURE = 0.2
 const TIMEOUT_MS = 60_000
 
 /**
+ * The SDK's own default retry budget (5 attempts, exponential backoff up to a
+ * 60s cap per step) is tuned for a long-running batch job, not a single call
+ * inside a serverless function with its own wall-clock limit — worst case it
+ * can burn most of a minute retrying before ever returning, which risks the
+ * *platform* killing the function first and the owner seeing a raw timeout
+ * instead of one of the messages below. Bounded explicitly and kept short:
+ * one real retry is enough to smooth over a blip, and "still failing after
+ * that" is a genuine, sustained problem (surfaced live: Gemini returning
+ * `503 UNAVAILABLE` / "high demand" for several seconds straight) that this
+ * app's own chunk-resume loop is the right layer to retry — a fresh click of
+ * "Try again" is just as valid a retry as a deeper one buried in the SDK, and
+ * it doesn't hold a function open while it waits.
+ */
+const RETRY_OPTIONS = { attempts: 3, initialDelay: 1, maxDelay: 4 }
+
+/**
  * The per-batch response schema: one property per field id, each an array of
  * exactly as many strings as that field has fragments.
  *
@@ -90,6 +106,16 @@ function describe(err: unknown, model: string): string {
     if (err.status === 429) {
       return 'The translation service is rate limiting us — wait a moment and continue.'
     }
+    if (err.status === 503) {
+      // What Google's own message actually says here ("high demand... try
+      // again later") is already the right advice, but it arrives as a raw
+      // JSON error body — surfaced live in the owner's own failure list as an
+      // ugly `{"error":{"code":503,...}}` blob. This is the friendly version.
+      return 'The translation service is overloaded right now — wait a moment and try again.'
+    }
+    if (err.status >= 500) {
+      return 'The translation service had an internal error — try again in a moment.'
+    }
     return `The translation service failed (${err.status}): ${err.message}`
   }
   return err instanceof Error ? err.message : 'The translation call failed.'
@@ -104,7 +130,10 @@ export function createGeminiTranslator(): Translator {
       throw new Error('Translation is not configured yet — GEMINI_API_KEY is not set.')
     }
     const model = process.env.GEMINI_MODEL || DEFAULT_MODEL
-    const client = new GoogleGenAI({ apiKey, httpOptions: { timeout: TIMEOUT_MS } })
+    const client = new GoogleGenAI({
+      apiKey,
+      httpOptions: { timeout: TIMEOUT_MS, retryOptions: RETRY_OPTIONS },
+    })
 
     let response
     try {
