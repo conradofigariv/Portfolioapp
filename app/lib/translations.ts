@@ -75,9 +75,17 @@ export const translations = {
       doneReview: 'Have a read before you share it — an AI translation is a first draft, not a final one.',
       someFailed: (n: number) =>
         n === 1 ? "1 field couldn't be translated:" : `${n} fields couldn't be translated:`,
-      retry: 'Try the rest again',
+      retryFailed: (n: number) => (n === 1 ? 'Retry the 1 that failed' : `Retry the ${n} that failed`),
       tryAgain: 'Try again',
-      stalled: "Those fields didn't go through. You can try again, or edit them by hand.",
+      partial: "Everything else went through. You can retry these, or edit them by hand.",
+      soFar: 'Saved so far',
+      savedBefore: (n: number) =>
+        n === 0
+          ? 'Nothing was translated yet.'
+          : n === 1
+            ? '1 field was translated and saved before this.'
+            : `${n} fields were translated and saved before this.`,
+      continueHint: 'Trying again picks up where this left off — only what’s still missing.',
       close: 'Close',
       cancel: 'Cancel',
       stop: 'Stop',
@@ -419,9 +427,17 @@ export const translations = {
       doneReview: 'Dale una leída antes de compartirlo — una traducción por IA es un primer borrador, no una versión final.',
       someFailed: (n: number) =>
         n === 1 ? 'No se pudo traducir 1 campo:' : `No se pudieron traducir ${n} campos:`,
-      retry: 'Reintentar el resto',
+      retryFailed: (n: number) => (n === 1 ? 'Reintentar el que falló' : `Reintentar los ${n} que fallaron`),
       tryAgain: 'Reintentar',
-      stalled: 'Esos campos no pasaron. Podés reintentar, o escribirlos a mano.',
+      partial: 'Todo lo demás pasó. Podés reintentar estos, o escribirlos a mano.',
+      soFar: 'Guardado hasta ahora',
+      savedBefore: (n: number) =>
+        n === 0
+          ? 'Todavía no se tradujo nada.'
+          : n === 1
+            ? '1 campo se tradujo y quedó guardado antes de esto.'
+            : `${n} campos se tradujeron y quedaron guardados antes de esto.`,
+      continueHint: 'Reintentar sigue desde donde quedó — solo lo que falta.',
       close: 'Cerrar',
       cancel: 'Cancelar',
       stop: 'Parar',

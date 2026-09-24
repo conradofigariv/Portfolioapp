@@ -11,23 +11,42 @@ import type { TranslateChunkResult } from './translate-actions'
  * it can be driven by a fake and checked offline, instead of only through a UI
  * that needs a live Supabase session and real model calls to reach at all.
  *
- * The loop deliberately has no iteration cap. Its two exits (`done` when the
- * plan empties, and a chunk that moved nothing) are what bound it; a counter on
- * top would only ever fire once one of those is already broken, and would hide
- * that rather than surface it.
+ * **One failing batch never blocks the rest.** A field that fails is added to
+ * `skip` for the remainder of the run (see `translateChunk`), so every chunk
+ * works on fields this run hasn't tried yet and the plan shrinks by a full
+ * batch each time, whatever the outcome. That's what bounds the loop — it
+ * can't revisit a field — rather than an iteration cap. The earlier version
+ * stopped the whole run the moment one chunk wrote nothing, and since the plan
+ * is sorted the same way every time, that was always the *same* first 6
+ * fields: a real run reported "0 of 124" on every click, with 118 fields that
+ * were never even attempted.
  */
 
-export type ChunkFn = (limit: number) => Promise<TranslateChunkResult>
+export type ChunkFn = (limit: number, skip: string[]) => Promise<TranslateChunkResult>
 
 export type RunOutcome =
-  /** The plan emptied — everything asked for was written. */
+  /** Every planned field was written. */
   | { status: 'done'; translated: number }
-  /** A whole chunk moved nothing. See below for why that's the stop signal. */
-  | { status: 'stalled'; translated: number; failures: FieldFailure[] }
+  /** The run reached the end of the plan, but these fields didn't make it. */
+  | { status: 'partial'; translated: number; failures: FieldFailure[] }
   /** `shouldStop` returned true between chunks. */
-  | { status: 'stopped'; translated: number }
-  /** The action itself refused (auth, config, a Postgres error). */
-  | { status: 'error'; translated: number; error: string }
+  | { status: 'stopped'; translated: number; failures: FieldFailure[] }
+  /**
+   * The action refused outright (auth, config, a Postgres error), or the model
+   * service failed on too many chunks in a row to be worth continuing.
+   * `translated` is what was saved before that.
+   */
+  | { status: 'error'; translated: number; error: string; failures: FieldFailure[] }
+
+/**
+ * How many chunks in a row may have their *whole* model call fail before the
+ * run gives up for now. One is a blip worth moving past (the next batch goes to
+ * the same service a few seconds later and often gets through); two in a row —
+ * each already having tried every fallback model — means the service is down,
+ * and ploughing through the remaining chunks would only produce a longer list
+ * of the same error.
+ */
+const MAX_CONSECUTIVE_CALL_ERRORS = 2
 
 export async function runTranslation(options: {
   chunk: ChunkFn
@@ -43,28 +62,40 @@ export async function runTranslation(options: {
 }): Promise<RunOutcome> {
   const { chunk, limit, shouldStop, onProgress } = options
   let translated = 0
+  // Keyed by block_key so a field can never be listed twice.
+  const failed = new Map<string, FieldFailure>()
+  const failures = () => [...failed.values()]
+  let callErrorsInARow = 0
 
   for (;;) {
-    if (shouldStop()) return { status: 'stopped', translated }
+    if (shouldStop()) return { status: 'stopped', translated, failures: failures() }
 
-    const result = await chunk(limit)
-    if (!result.ok) return { status: 'error', translated, error: result.error }
+    const result = await chunk(limit, [...failed.keys()])
+    if (!result.ok) return { status: 'error', translated, error: result.error, failures: failures() }
 
     translated += result.translated
-    // The server's `remaining` is recomputed from a fresh plan each chunk, so
-    // "what's left" stays right even if the portfolio changed underneath —
-    // rather than counting down from a total captured once at the start.
-    onProgress(translated, translated + result.remaining)
+    for (const failure of result.failures) failed.set(failure.blockKey, failure)
+    // `remaining` is recomputed from a fresh plan each chunk, so the total
+    // stays right even if the portfolio changed underneath mid-run, rather
+    // than counting down from a figure captured once at the start.
+    onProgress(translated, translated + failed.size + result.remaining)
 
-    if (result.done) return { status: 'done', translated }
+    if (result.done) {
+      return failed.size === 0
+        ? { status: 'done', translated }
+        : { status: 'partial', translated, failures: failures() }
+    }
 
-    // A failed field deliberately leaves its target row untouched, so it comes
-    // back as `missing` on the next plan. That is what makes a *transient*
-    // failure self-healing — and what would make a *permanent* one (a model
-    // that keeps answering one field in the wrong shape) loop forever. A single
-    // chunk cannot tell those apart; a whole chunk moving nothing can.
-    if (result.translated === 0) {
-      return { status: 'stalled', translated, failures: result.failures }
+    callErrorsInARow = result.callError ? callErrorsInARow + 1 : 0
+    if (callErrorsInARow >= MAX_CONSECUTIVE_CALL_ERRORS) {
+      return { status: 'error', translated, error: result.callError as string, failures: failures() }
+    }
+
+    // Can't happen with a well-behaved server (a non-empty plan always yields
+    // a non-empty batch), but it's the one way this loop could spin without
+    // the plan shrinking, so it's guarded rather than assumed.
+    if (result.attempted === 0) {
+      return { status: 'partial', translated, failures: failures() }
     }
   }
 }

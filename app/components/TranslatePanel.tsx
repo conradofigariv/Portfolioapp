@@ -27,7 +27,7 @@ const CHUNK = 6
 
 const LABEL: Record<Lang, string> = { es: 'ES', en: 'EN' }
 
-type Phase = 'checking' | 'ready' | 'running' | 'done' | 'stalled' | 'stopped' | 'error'
+type Phase = 'checking' | 'ready' | 'running' | 'done' | 'partial' | 'stopped' | 'error'
 
 const noopSubscribe = () => () => {}
 
@@ -85,6 +85,10 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
       setError(null)
       setFailures([])
       setCounts(null)
+      // Also what tells the error phase apart: a preview that failed never
+      // ran anything, so it has no progress to show.
+      setDone(0)
+      setTotal(0)
     }
   }
 
@@ -112,17 +116,19 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
     }
   }, [open, from, reloads])
 
-  async function run() {
+  // `expected`/`copiedAsIs` only seed the bar until the first chunk answers
+  // with the server's own figure — see runTranslation's onProgress.
+  async function run(expected: number, copiedAsIs: number) {
     stopRef.current = false
     setPhase('running')
     setError(null)
     setFailures([])
     setDone(0)
-    setCopied(counts?.languageNeutral ?? 0)
-    setTotal((counts?.missing ?? 0) + (includeStale ? counts?.stale ?? 0 : 0))
+    setCopied(copiedAsIs)
+    setTotal(expected)
 
     const outcome = await runTranslation({
-      chunk: (limit) => translateChunk({ from, to, includeStale, limit }),
+      chunk: (limit, skip) => translateChunk({ from, to, includeStale, limit, skip }),
       limit: CHUNK,
       shouldStop: () => stopRef.current,
       onProgress: (translated, live) => {
@@ -132,7 +138,7 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
     })
 
     if (outcome.status === 'error') setError(outcome.error)
-    if (outcome.status === 'stalled') setFailures(outcome.failures)
+    if (outcome.status !== 'done') setFailures(outcome.failures)
     setPhase(outcome.status)
 
     // Whatever landed has to become visible: the action revalidates the cache
@@ -150,6 +156,10 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
   const nothingToDo = phase === 'ready' && counts !== null && counts.missing === 0 && counts.stale === 0
   const canStart =
     phase === 'ready' && counts !== null && (counts.missing > 0 || (includeStale && counts.stale > 0))
+  // Whether this phase is the end of a run (as opposed to a preview that
+  // failed before anything ran) — only then is there progress to show.
+  const ran = phase === 'running' || phase === 'done' || phase === 'partial' || phase === 'stopped' || (phase === 'error' && total > 0)
+  const finished = phase === 'done' || phase === 'partial'
 
   return createPortal(
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/85 p-4">
@@ -245,10 +255,14 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
                 </>
               )}
 
-              {(phase === 'running' || phase === 'done' || phase === 'stalled' || phase === 'stopped') && (
+              {ran && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-dark-300">{busy ? c.running : c.done}</span>
+                    {/* "Done" only once the run actually reached the end of
+                        the plan — reported live as "Done · 0 of 124" on a run
+                        that had stopped at its first batch, which read as if
+                        the rest had gone through. */}
+                    <span className="text-dark-300">{busy ? c.running : finished ? c.done : c.soFar}</span>
                     <span className="text-dark-400 tabular-nums">{c.progress(done, total)}</span>
                   </div>
                   <div className="h-1.5 rounded-full bg-dark-700 overflow-hidden">
@@ -266,25 +280,27 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
               {phase === 'done' && <p className="text-xs text-dark-300 leading-relaxed">{c.doneReview}</p>}
               {phase === 'stopped' && <p className="text-xs text-dark-300">{c.stopped}</p>}
 
-              {phase === 'stalled' && (
-                <div className="space-y-2">
-                  <p className="text-xs text-dark-300">{c.stalled}</p>
-                  {failures.length > 0 && (
-                    <>
-                      <p className="text-xs text-dark-400">{c.someFailed(failures.length)}</p>
-                      <ul className="space-y-1">
-                        {failures.map((f) => (
-                          <li key={f.blockKey} className="text-[11px] text-dark-500 leading-relaxed">
-                            <span className="font-mono text-dark-400">{f.blockKey}</span> — {f.error}
-                          </li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
+              {phase === 'error' && error && (
+                <div className="space-y-1.5">
+                  <p className="text-sm text-red-400 leading-relaxed">{error}</p>
+                  {total > 0 && <p className="text-xs text-dark-400">{c.savedBefore(done)}</p>}
+                  {done > 0 && <p className="text-xs text-dark-500">{c.continueHint}</p>}
                 </div>
               )}
 
-              {phase === 'error' && error && <p className="text-sm text-red-400 leading-relaxed">{error}</p>}
+              {phase === 'partial' && failures.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs text-dark-300">{c.partial}</p>
+                  <p className="text-xs text-dark-400">{c.someFailed(failures.length)}</p>
+                  <ul className="space-y-1">
+                    {failures.map((f) => (
+                      <li key={f.blockKey} className="text-[11px] text-dark-500 leading-relaxed">
+                        <span className="font-mono text-dark-400">{f.blockKey}</span> — {f.error}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </motion.div>
           </AnimatePresence>
         </div>
@@ -311,19 +327,37 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
           ) : (
             <>
               <button type="button" onClick={onClose} className="text-xs text-dark-300 hover:text-dark-50 transition">
-                {phase === 'done' ? c.close : c.cancel}
+                {finished ? c.close : c.cancel}
               </button>
-              {(phase === 'stalled' || phase === 'stopped' || phase === 'error') && (
-                <button type="button" onClick={() => setReloads((n) => n + 1)} className="button-primary text-sm py-1.5 px-4">
-                  {/* "Try the rest again" only makes sense when there *is* a
-                      rest — a run that stalled part-way. After an outright
-                      failure (not signed in, no API key) or a deliberate stop,
-                      it would be describing something that never happened. */}
-                  {phase === 'stalled' ? c.retry : c.tryAgain}
+              {phase === 'partial' && failures.length > 0 && (
+                // Straight into a new run: everything else from this one is
+                // already written, so a fresh plan is exactly the fields that
+                // failed — nothing that already went through is sent again.
+                <button
+                  type="button"
+                  onClick={() => void run(failures.length, 0)}
+                  className="button-primary text-sm py-1.5 px-4"
+                >
+                  {c.retryFailed(failures.length)}
                 </button>
               )}
-              {canStart && (
-                <button type="button" onClick={() => void run()} className="button-primary text-sm py-1.5 px-4">
+              {(phase === 'stopped' || phase === 'error') && (
+                // Back through the preview rather than straight into a run, so
+                // the owner sees the (now smaller) count of what's left before
+                // starting — after an outright failure (not signed in, no API
+                // key) there may be nothing sensible to run at all.
+                <button type="button" onClick={() => setReloads((n) => n + 1)} className="button-primary text-sm py-1.5 px-4">
+                  {c.tryAgain}
+                </button>
+              )}
+              {canStart && counts !== null && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    void run(counts.missing + (includeStale ? counts.stale : 0), counts.languageNeutral)
+                  }
+                  className="button-primary text-sm py-1.5 px-4"
+                >
                   {c.start}
                 </button>
               )}
