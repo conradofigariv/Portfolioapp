@@ -49,6 +49,21 @@ export type TranslatedField = {
 
 export type FieldFailure = { blockKey: string; error: string }
 
+/**
+ * What the owner is shown about one field, as the run goes and at the end —
+ * plain text, not documents: a readable "before → after" is the whole point,
+ * and a snippet is all a progress panel has room for. Built by the action
+ * (translate-actions.ts), which has both the source and the stored result.
+ */
+export type FieldPreview = {
+  blockKey: string
+  /** Which part of the page — `hero`, `journey`, `projects`, … */
+  section: string
+  source: string
+}
+export type TranslatedItem = FieldPreview & { result: string }
+export type ChunkFailure = FieldFailure & Partial<FieldPreview>
+
 export type BatchResult = {
   translated: TranslatedField[]
   failed: FieldFailure[]
