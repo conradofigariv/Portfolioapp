@@ -6,6 +6,7 @@ import { useLang } from '../context/LanguageContext'
 import BackgroundPicker from './BackgroundPicker'
 import AppLanguagePicker from './AppLanguagePicker'
 import { FlagES, FlagUS } from './FlagIcon'
+import DownloadPdfButton from './DownloadPdfButton'
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false)
@@ -88,6 +89,8 @@ export default function Navbar() {
             </form>
           )}
 
+          <DownloadPdfButton variant="nav" />
+
           {media.cv && (
             <button
               onClick={() => setIsCVOpen(true)}
@@ -165,6 +168,7 @@ export default function Navbar() {
                 {link.label}
               </a>
             ))}
+            <DownloadPdfButton variant="menu" />
             {media.cv && (
               <button
                 onClick={() => {

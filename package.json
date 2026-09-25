@@ -19,6 +19,7 @@
   "dependencies": {
     "@floating-ui/react": "^0.27.20",
     "@google/genai": "^2.24.0",
+    "@react-pdf/renderer": "^4.9.0",
     "@supabase/ssr": "^0.12.6",
     "@supabase/supabase-js": "^2.115.0",
     "@tiptap/core": "^3.31.3",

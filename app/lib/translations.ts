@@ -12,6 +12,17 @@ export const translations = {
       downloadCVAction: 'Download CV',
       closeCV: 'Close',
     },
+    // The "Download PDF" button and the PDF's own fixed labels. Content
+    // language (`t`), not `uiT`: a visitor presses it and reads the result.
+    pdf: {
+      download: 'Download PDF',
+      short: 'PDF',
+      preparing: 'Preparing…',
+      failed: 'Couldn’t create the PDF — try again.',
+      email: 'Email',
+      page: 'Page',
+      livePortfolio: 'Live portfolio',
+    },
     // The app-language dropdown under Navbar's initials icon (see
     // uiLang/setUiLang in LanguageContext) — controls this `t` object itself,
     // independent of the content-language toggle (`lang`) right next to it.
@@ -414,6 +425,15 @@ export const translations = {
       viewCV: 'CV',
       downloadCVAction: 'Descargar CV',
       closeCV: 'Cerrar',
+    },
+    pdf: {
+      download: 'Descargar PDF',
+      short: 'PDF',
+      preparing: 'Preparando…',
+      failed: 'No se pudo crear el PDF — probá de nuevo.',
+      email: 'Email',
+      page: 'Página',
+      livePortfolio: 'Portfolio online',
     },
     appLanguage: {
       label: 'Idioma de la app',
