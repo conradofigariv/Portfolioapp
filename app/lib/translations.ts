@@ -98,38 +98,39 @@ export const translations = {
           : `+ ${n} that already have content in ${target} — you’ll review them before anything changes`,
       reviewTitle: 'Review before applying',
       reviewIntro: (target: string): string =>
-        `These already have content in ${target}, so nothing changes until you apply. Tick the fields you want to update and pick what to do with each list — the preview under it shows how it will look.`,
+        `These already have content in ${target}, so nothing changes until you apply. Tick the fields you want to update, and build each list by picking what stays.`,
       changedIn: (source: string): string => `Edited in ${source} after it was translated`,
-      legendAdded: 'added',
-      legendRemoved: 'removed',
-      legendChanged: 'updated',
-      copyTag: 'copy',
-      choiceHelp: (choice: string, source: string): string =>
-        choice === 'sync'
-          ? `Adds what’s new in ${source} and updates what you edited there. Deletes nothing.`
-          : choice === 'replace'
-            ? `This list becomes the translation of the ${source} one. What’s there now is removed.`
-            : choice === 'dedupe'
-              ? 'Removes the translated copies and keeps only what you wrote.'
-              : 'Nothing changes in this list.',
       apply: (n: number): string => (n === 0 ? 'Apply' : n === 1 ? 'Apply 1 change' : `Apply ${n} changes`),
       skip: 'Skip',
       applying: 'Applying',
       noTranslation: 'Couldn’t translate this one',
-      copiesHint: 'Has translated copies next to your own items — marked “copy”.',
       removed: (n: number): string => (n === 1 ? '1 item removed' : `${n} items removed`),
+      presets: {
+        recommended: 'Recommended',
+        mine: 'Only mine',
+        translated: 'All translated',
+        skip: 'Leave as is',
+      } as Record<string, string>,
+      origins: { own: 'Yours', previous: 'Previous', new: 'New' } as Record<string, string>,
+      originsLegend: 'Yours = you wrote it · Previous = a translation already on the page · New = translated just now',
+      pickHintCheck: 'Tick what should stay. Identical items are shown once.',
+      pickHintPairs: (source: string): string => `Pick one version of each item — the ${source} original is on top.`,
+      resultTitle: 'Result',
+      dragHint: 'Drag to reorder',
+      skipped: 'This list stays exactly as it is.',
+      emptyResult: 'Nothing selected — this list would end up empty.',
+      diff: (added: number, removed: number, reordered: boolean): string =>
+        added === 0 && removed === 0
+          ? reordered
+            ? 'Only the order changes'
+            : 'No changes'
+          : [added ? `+${added} new` : '', removed ? `−${removed} removed` : ''].filter(Boolean).join(' · '),
       kinds: {
         narrative: 'Lines',
         tags: 'Tags',
         skills: 'Skills',
         availability: 'Availability',
         certs: 'Certifications',
-      } as Record<string, string>,
-      choices: {
-        keep: 'Keep as is',
-        sync: 'Update',
-        replace: 'Replace',
-        dedupe: 'Remove copies',
       } as Record<string, string>,
       sections: {
         hero: 'Intro',
@@ -497,38 +498,39 @@ export const translations = {
           : `+ ${n} que ya tienen contenido en ${target} — los vas a revisar antes de que cambie nada`,
       reviewTitle: 'Revisá antes de aplicar',
       reviewIntro: (target: string): string =>
-        `Esto ya tiene contenido en ${target}, así que no cambia nada hasta que apliques. Tildá los campos que quieras actualizar y elegí qué hacer con cada lista — la vista previa de abajo muestra cómo va a quedar.`,
+        `Esto ya tiene contenido en ${target}, así que no cambia nada hasta que apliques. Tildá los campos que quieras actualizar y armá cada lista eligiendo qué queda.`,
       changedIn: (source: string): string => `Lo editaste en ${source} después de traducirlo`,
-      legendAdded: 'se agrega',
-      legendRemoved: 'se quita',
-      legendChanged: 'se actualiza',
-      copyTag: 'copia',
-      choiceHelp: (choice: string, source: string): string =>
-        choice === 'sync'
-          ? `Agrega lo nuevo del ${source} y actualiza lo que editaste. No borra nada.`
-          : choice === 'replace'
-            ? `Esta lista pasa a ser la traducción de la del ${source}. Se quita lo que hay ahora.`
-            : choice === 'dedupe'
-              ? 'Quita las copias traducidas y deja solo lo que escribiste vos.'
-              : 'Esta lista no cambia.',
       apply: (n: number): string => (n === 0 ? 'Aplicar' : n === 1 ? 'Aplicar 1 cambio' : `Aplicar ${n} cambios`),
       skip: 'Omitir',
       applying: 'Aplicando',
       noTranslation: 'No se pudo traducir este',
-      copiesHint: 'Tiene copias traducidas junto a tus ítems — marcadas como «copia».',
       removed: (n: number): string => (n === 1 ? 'Se quitó 1 ítem' : `Se quitaron ${n} ítems`),
+      presets: {
+        recommended: 'Recomendado',
+        mine: 'Solo lo mío',
+        translated: 'Todo traducido',
+        skip: 'No tocar',
+      } as Record<string, string>,
+      origins: { own: 'Tuyo', previous: 'Anterior', new: 'Nueva' } as Record<string, string>,
+      originsLegend: 'Tuyo = lo escribiste vos · Anterior = traducción que ya estaba · Nueva = traducida recién',
+      pickHintCheck: 'Tildá lo que querés que quede. Lo que dice lo mismo aparece una sola vez.',
+      pickHintPairs: (source: string): string => `Elegí una versión de cada ítem — arriba, el original en ${source}.`,
+      resultTitle: 'Así queda',
+      dragHint: 'Arrastrá para ordenar',
+      skipped: 'Esta lista queda exactamente como está.',
+      emptyResult: 'No elegiste nada — la lista quedaría vacía.',
+      diff: (added: number, removed: number, reordered: boolean): string =>
+        added === 0 && removed === 0
+          ? reordered
+            ? 'Solo cambia el orden'
+            : 'Sin cambios'
+          : [added ? `+${added} nuevos` : '', removed ? `−${removed} se quitan` : ''].filter(Boolean).join(' · '),
       kinds: {
         narrative: 'Líneas',
         tags: 'Tags',
         skills: 'Habilidades',
         availability: 'Disponibilidad',
         certs: 'Certificaciones',
-      } as Record<string, string>,
-      choices: {
-        keep: 'Dejar como está',
-        sync: 'Actualizar',
-        replace: 'Reemplazar',
-        dedupe: 'Quitar copias',
       } as Record<string, string>,
       sections: {
         hero: 'Presentación',

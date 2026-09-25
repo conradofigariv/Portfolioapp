@@ -11,7 +11,6 @@ import {
   planTranslation,
   plannedFields,
   reviewFields,
-  type ListChoice,
   type ListReview,
   type PlannedField,
   type TranslatableBlock,
@@ -130,7 +129,6 @@ export type ReviewView = {
     parentTitle: string
     source: (ListReview['source'][number])[]
     target: (ListReview['target'][number])[]
-    choices: ListChoice[]
   }[]
 }
 
@@ -419,7 +417,6 @@ export async function previewTranslation(options: {
         parentTitle: snippet(list.parentTitle),
         source: list.source.map((item) => ({ ...item, text: snippet(item.text) })),
         target: list.target.map((item) => ({ ...item, text: snippet(item.text) })),
-        choices: list.choices,
       })),
     }
     return { ok: true, review, ...countsOf(plan) }
@@ -436,7 +433,7 @@ export type ApplyReviewResult =
       ok: true
       /** What was written, for the end-of-run summary. */
       written: TranslatedItem[]
-      /** How many target rows were deleted (replaced or de-duplicated lists). */
+      /** How many list items were removed (left out of a list's final selection). */
       removed: number
       failures: ChunkFailure[]
     }
@@ -445,20 +442,21 @@ export type ApplyReviewResult =
 /**
  * Write what the owner accepted on the review screen.
  *
- * **The server re-plans and decides every key itself** — the client only sends
- * *which* stale fields it accepted, a choice per list prefix, and the
- * translated documents. Which rows a `replace` deletes, which items a `sync`
- * adds, which ones a `dedupe` removes: all read from a fresh plan here, never
- * from the request. That both keeps a crafted request from deleting arbitrary
- * rows and handles the page changing between review and apply (a list that no
- * longer needs review, or no longer offers that choice, is reported rather
- * than half-applied).
+ * For each list, the client sends the **final list as an ordered sequence of
+ * item references** — `{from: 'target', itemId}` keeps an item already on the
+ * page, `{from: 'source', itemId}` writes the new translation of a source
+ * item (list-merge.ts builds these from the owner's picks). Everything else is
+ * decided here from a fresh plan, never from the request: every referenced id
+ * has to exist in *this* list right now (a crafted request can't touch rows
+ * outside it, and a list that changed since the preview is reported instead of
+ * half-applied), which rows get deleted is "every row of this list whose item
+ * isn't in the sequence", and every item's sort_order becomes its position.
  */
 export async function applyTranslationReview(options: {
   from: Lang
   to: Lang
   fields: string[]
-  lists: { prefix: string; choice: ListChoice }[]
+  lists: { prefix: string; items: { from: 'target' | 'source'; itemId: string }[] }[]
   translations: { blockKey: string; json: JSONContent }[]
 }): Promise<ApplyReviewResult> {
   try {
@@ -467,16 +465,20 @@ export async function applyTranslationReview(options: {
     if (invalid) return { ok: false, error: invalid }
 
     const accepted = stringSet(options.fields, MAX_REVIEW_ITEMS)
-    const decisions = new Map<string, ListChoice>()
+    type Ref = { from: 'target' | 'source'; itemId: string }
+    const decisions = new Map<string, Ref[] | null>()
     if (Array.isArray(options.lists)) {
       for (const entry of options.lists.slice(0, MAX_REVIEW_ITEMS)) {
-        if (
-          entry &&
-          typeof entry.prefix === 'string' &&
-          (entry.choice === 'sync' || entry.choice === 'replace' || entry.choice === 'dedupe')
-        ) {
-          decisions.set(entry.prefix, entry.choice)
-        }
+        if (!entry || typeof entry.prefix !== 'string') continue
+        const items = Array.isArray(entry.items) ? entry.items.slice(0, MAX_REVIEW_ITEMS) : null
+        const valid =
+          items &&
+          items.every(
+            (ref) =>
+              ref && (ref.from === 'target' || ref.from === 'source') && typeof ref.itemId === 'string' && ref.itemId
+          )
+        // null marks a malformed entry, reported below rather than dropped silently.
+        decisions.set(entry.prefix, valid ? (items as Ref[]) : null)
       }
     }
     const docs = new Map<string, JSONContent>()
@@ -513,20 +515,32 @@ export async function applyTranslationReview(options: {
 
     // Lists.
     const listByPrefix = new Map(plan.lists.map((list) => [list.prefix, list]))
-    for (const [prefix, choice] of decisions) {
+    const reorders: { keys: string[]; sortOrder: number }[] = []
+    let removedItems = 0
+    const changed = (prefix: string) =>
+      failures.push({ blockKey: prefix, error: 'This list changed since the preview — run the translation again.' })
+    for (const [prefix, refs] of decisions) {
       const list = listByPrefix.get(prefix)
-      if (!list || !list.choices.includes(choice)) {
-        failures.push({ blockKey: prefix, error: 'This list changed since the preview — run the translation again.' })
+      if (!list || !refs) {
+        changed(prefix)
         continue
       }
-      const fieldByKey = new Map(list.fields.map((field) => [field.blockKey, field]))
-      const needed =
-        choice === 'dedupe'
-          ? []
-          : list.source.filter((item) => choice === 'replace' || item.status !== 'shared').flatMap((item) => item.keys)
+      const targetById = new Map(list.target.map((item) => [item.itemId, item]))
+      const sourceById = new Map(list.source.map((item) => [item.itemId, item]))
+      const ids = refs.map((ref) => ref.itemId)
+      const known = refs.every((ref) => (ref.from === 'target' ? targetById : sourceById).has(ref.itemId))
+      // The same item twice (kept *and* rewritten, or listed twice) can't be
+      // one list's content — list-merge never produces it, so it's a request
+      // that doesn't match this list.
+      if (!known || new Set(ids).size !== ids.length) {
+        changed(prefix)
+        continue
+      }
+
+      const needed = refs.filter((ref) => ref.from === 'source').flatMap((ref) => sourceById.get(ref.itemId)!.keys)
       const missing = needed.filter((key) => !docs.has(key))
       if (missing.length > 0) {
-        // All or nothing per list: half a replaced list is worse than none.
+        // All or nothing per list: half of a chosen list is worse than none.
         failures.push({
           blockKey: prefix,
           error: `${missing.length} item(s) of this list weren't translated — retry the translation.`,
@@ -534,49 +548,78 @@ export async function applyTranslationReview(options: {
         })
         continue
       }
-      for (const key of needed) {
-        const field = fieldByKey.get(key)!
-        writes.push({ blockKey: key, section: field.section, json: docs.get(key)!, sortOrder: field.sortOrder })
-      }
 
+      const fieldByKey = new Map(list.fields.map((field) => [field.blockKey, field]))
+      const written = new Set<string>()
+      refs.forEach((ref, index) => {
+        if (ref.from === 'source') {
+          for (const key of sourceById.get(ref.itemId)!.keys) {
+            const field = fieldByKey.get(key)!
+            // sort_order is the item's position in the owner's final order.
+            writes.push({ blockKey: key, section: field.section, json: docs.get(key)!, sortOrder: index })
+            written.add(key)
+          }
+        } else {
+          reorders.push({ keys: targetById.get(ref.itemId)!.keys, sortOrder: index })
+        }
+      })
+
+      // Every row of this list whose item isn't in the final sequence goes —
+      // plus, for an item being rewritten, any old field the new translation
+      // doesn't have (a certification whose issuer is now empty).
+      const finalIds = new Set(ids)
       const sourceIds = new Set(list.source.map((item) => item.itemId))
-      const written = new Set(needed)
-      if (choice === 'replace') {
-        for (const key of list.targetKeys) if (!written.has(key)) deletes.push(key)
-      } else if (choice === 'dedupe') {
-        for (const key of list.targetKeys) {
-          if (sourceIds.has(listItemOf(key)?.itemId ?? '')) deletes.push(key)
+      const gone = new Set<string>()
+      for (const key of list.targetKeys) {
+        const itemId = listItemOf(key)?.itemId ?? ''
+        if (!finalIds.has(itemId)) {
+          deletes.push(key)
+          gone.add(itemId)
+        } else if (refs.some((ref) => ref.from === 'source' && ref.itemId === itemId) && !written.has(key)) {
+          deletes.push(key)
         }
       }
+      removedItems += gone.size
       // A certification's uploaded file is keyed by its item id, not by
       // language: one whose id only ever existed in the target list (written
-      // there by hand) is gone for good once `replace` removes it, so its file
-      // goes too — the same orphan cleanup the certification's own remove
-      // button does. A shared id's file belongs to the source's item as well
-      // and stays.
-      if (list.kind === 'certs' && choice === 'replace') {
-        for (const item of list.target) if (!sourceIds.has(item.itemId)) orphanedCerts.push(item.itemId)
+      // there by hand) is gone for good once it's left out, so its file goes
+      // too — the same orphan cleanup the certification's own remove button
+      // does. A shared id's file belongs to the source's item as well and stays.
+      if (list.kind === 'certs') {
+        for (const itemId of gone) if (!sourceIds.has(itemId)) orphanedCerts.push(itemId)
       }
     }
 
-    // Deletes first, so a `replace` never briefly shows both lists.
-    let removed = 0
+    // Deletes first, so a list never briefly shows both its old and new items.
     if (deletes.length > 0) {
-      const { error, count } = await supabase
+      const { error } = await supabase
         .from('portfolio_blocks')
-        .delete({ count: 'exact' })
+        .delete()
         .eq('portfolio_id', portfolioId)
         .eq('lang', to)
         .in('block_key', deletes)
       if (error) return { ok: false, error: error.message }
-      removed = count ?? deletes.length
     }
     for (const certId of orphanedCerts) await removeCertificationFile(certId)
+
+    // Kept items move to their position in the owner's order.
+    const reordered = await Promise.all(
+      reorders.map(({ keys, sortOrder }) =>
+        supabase
+          .from('portfolio_blocks')
+          .update({ sort_order: sortOrder })
+          .eq('portfolio_id', portfolioId)
+          .eq('lang', to)
+          .in('block_key', keys)
+      )
+    )
+    const reorderError = reordered.find((result) => result.error)?.error
+    if (reorderError) failures.push({ blockKey: 'order', error: reorderError.message })
 
     const stored = await writeFields(supabase, portfolioId, to, writes)
     failures.push(...stored.failures)
 
-    if (stored.written.length > 0 || removed > 0) revalidatePath('/', 'layout')
+    if (stored.written.length > 0 || deletes.length > 0 || reorders.length > 0) revalidatePath('/', 'layout')
 
     const sourceText = new Map(
       [...plan.stale, ...plan.lists.flatMap((list) => list.fields)].map((f) => [f.blockKey, snippet(f.texts.join(''))])
@@ -589,7 +632,7 @@ export async function applyTranslationReview(options: {
         source: sourceText.get(field.blockKey) ?? '',
         result: snippet(plainTextFromDoc(safeJson)),
       })),
-      removed,
+      removed: removedItems,
       failures,
     }
   } catch (err) {

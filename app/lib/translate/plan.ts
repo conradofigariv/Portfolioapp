@@ -101,8 +101,6 @@ export function listItemOf(
   return null
 }
 
-export type ListChoice = 'sync' | 'replace' | 'dedupe'
-
 /** One item of a list as the review shows it: plain text, in list order. */
 export type ListItemView = { itemId: string; text: string; sortOrder: number }
 
@@ -116,13 +114,13 @@ export type ListItemView = { itemId: string; text: string; sortOrder: number }
  * - `target[].shared`: whether that target item came from a source item (same
  *   id). A target item that *isn't* shared was written in the target language
  *   by hand — the case that must never be overwritten silently.
- * - `choices` — which actions make sense, besides leaving it alone:
- *   - `sync`: add the `new` items and update the `changed` ones, delete
- *     nothing. Only when every target item is shared (the lists are aligned).
- *   - `replace`: the target list becomes the translation of the source list.
- *   - `dedupe`: delete the shared items, keep the hand-written ones. Only when
- *     the target has both — exactly the state the first version of this
- *     feature left behind, so this is also how that gets cleaned up.
+ * - `target[].keys`: every row of that item, so the server can re-order or
+ *   delete it as a unit.
+ *
+ * What the owner does with it is a per-item selection (see list-merge.ts):
+ * the review shows the current items, the previous translations and the new
+ * ones, and the final list is whatever the owner picks, in the order they
+ * drag it into. The planner only describes the two lists.
  */
 export type ListReview = {
   prefix: string
@@ -131,12 +129,11 @@ export type ListReview = {
   /** The owning project's title / skill category's name, when there is one. */
   parentTitle: string
   source: (ListItemView & { keys: string[]; status: 'shared' | 'changed' | 'new' })[]
-  target: (ListItemView & { shared: boolean })[]
+  target: (ListItemView & { shared: boolean; keys: string[] })[]
   /** Every target row under the prefix, empty ones included — what `replace` deletes. */
   targetKeys: string[]
   /** Every non-empty field of every source item — what gets translated. */
   fields: PlannedField[]
-  choices: ListChoice[]
 }
 
 export type TranslationPlan = {
@@ -389,21 +386,16 @@ export function planTranslation(
       text: itemText(item),
       sortOrder: item.sortOrder,
       shared: srcIds.has(item.itemId),
+      keys: item.rows.map((row) => row.blockKey),
     }))
 
     const ownInTarget = target.some((item) => !item.shared)
-    const sharedInTarget = target.some((item) => item.shared)
     const needsSync = source.some((item) => item.status !== 'shared')
 
     if (!ownInTarget && !needsSync) {
       out.unchanged += fields.length
       return null
     }
-
-    const choices: ListChoice[] = []
-    if (!ownInTarget) choices.push('sync')
-    choices.push('replace')
-    if (ownInTarget && sharedInTarget) choices.push('dedupe')
 
     const first = listItemOf(sourceRows[0].blockKey)!
     // "projects.items.<id>.narrative" → "projects.items.<id>.title", and the
@@ -429,7 +421,6 @@ export function planTranslation(
       target,
       targetKeys: targetRows.map((row) => row.blockKey).sort(),
       fields,
-      choices,
     }
   }
 }
@@ -450,7 +441,7 @@ export function plannedFields(plan: TranslationPlan): PlannedField[] {
 /**
  * What the review step needs translated before it can show anything: every
  * stale scalar, and every source field of every list under review (all of
- * them, so any of the list's choices can be previewed). Sorted and de-duped,
+ * them, so every version of every item can be offered in the review). Sorted and de-duped,
  * for the same "take the next N" chunking as a fill run.
  */
 export function reviewFields(plan: TranslationPlan): PlannedField[] {
