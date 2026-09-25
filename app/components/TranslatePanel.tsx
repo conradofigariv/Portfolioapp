@@ -43,7 +43,6 @@ import {
   toggleAlt,
   type Alt,
   type ItemRef,
-  type Origin,
   type Preset,
   type Selection,
   type Slot,
@@ -695,7 +694,7 @@ function ReviewStep({
         {review.lists.length > 0 && (
           // The origin tags, explained once — each row then carries only the
           // short word ("Yours", "Previous", "New").
-          <p className="mt-2 text-[11px] text-dark-500 leading-relaxed">{c.originsLegend}</p>
+          <p className="mt-2 text-[11px] text-dark-500 leading-relaxed">{c.tagsLegend}</p>
         )}
       </div>
 
@@ -769,25 +768,35 @@ function ReviewStep({
   )
 }
 
-const ORIGIN_STYLE: Record<Origin, string> = {
-  own: 'border-dark-500 text-dark-200',
-  previous: 'border-amber-400/30 text-amber-200/80',
+/**
+ * One tag per row, and it answers the only question that matters to the
+ * owner: is this text on the page today, or would this translation bring it
+ * in? The model underneath still knows more (own vs previous translation, and
+ * every origin a merged row came from) — printing all of that ("Anterior ·
+ * Nueva" on one row) read as noise, and "yours" vs "previous translation" is
+ * a distinction the page itself never shows. A row whose text is on the page
+ * keeps that stored item when picked (see list-merge.ts), so `ref.from` is
+ * exactly "on the page".
+ */
+type Tag = 'current' | 'new'
+
+function tagOf(alt: Alt): Tag {
+  return alt.ref.from === 'target' ? 'current' : 'new'
+}
+
+const TAG_STYLE: Record<Tag, string> = {
+  current: 'border-dark-500 text-dark-200',
   new: 'border-[#d8ff3e]/40 text-[#d8ff3e]',
 }
 
-function OriginBadges({ origins }: { origins: Origin[] }) {
+function AltTag({ alt }: { alt: Alt }) {
   const { uiT } = useLang()
-  const c = uiT.translate
+  const tag = tagOf(alt)
   return (
-    <span className="inline-flex flex-wrap gap-1 align-middle">
-      {origins.map((origin) => (
-        <span
-          key={origin}
-          className={`inline-block rounded border px-1 text-[9px] leading-[14px] uppercase tracking-wider whitespace-nowrap ${ORIGIN_STYLE[origin]}`}
-        >
-          {c.origins[origin]}
-        </span>
-      ))}
+    <span
+      className={`inline-block align-middle rounded border px-1 text-[9px] leading-[14px] uppercase tracking-wider whitespace-nowrap ${TAG_STYLE[tag]}`}
+    >
+      {uiT.translate.tags[tag]}
     </span>
   )
 }
@@ -888,28 +897,42 @@ function ListCard({
 
           {mode === 'check' ? (
             <ul className="space-y-0.5">
-              {pickerSlots.map((slot) => (
-                <li key={slot.id} className={slot.alts.length > 1 ? 'border-l border-dark-700 pl-2 space-y-0.5' : ''}>
-                  {slot.alts.map((alt) => {
-                    const on = sel.selection.picks[slot.id] === alt.key
-                    return (
-                      <button
-                        key={alt.key}
-                        type="button"
-                        role="checkbox"
-                        aria-checked={on}
-                        onClick={() => toggle(slot.id, alt.key)}
-                        className="w-full flex items-start gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-dark-800/60 transition-colors"
-                      >
-                        <CheckBox on={on} />
-                        <span className={`min-w-0 flex-1 text-xs leading-5 ${on ? 'text-dark-50' : 'text-dark-400'}`}>
-                          {alt.text} <OriginBadges origins={alt.origins} />
-                        </span>
-                      </button>
-                    )
-                  })}
-                </li>
-              ))}
+              {pickerSlots.map((slot) => {
+                // A slot with two versions (the translation on the page and a
+                // different new one) holds one of them at most: circles and a
+                // "pick one" label say so, where checkboxes read as "tick both".
+                const group = slot.alts.length > 1
+                return (
+                  <li
+                    key={slot.id}
+                    role={group ? 'radiogroup' : undefined}
+                    aria-label={group ? c.pickOne : undefined}
+                    className={group ? 'my-1 rounded-lg border border-dark-800 px-1 pt-1 pb-0.5' : ''}
+                  >
+                    {group && (
+                      <p className="px-2 pb-0.5 text-[10px] uppercase tracking-wider text-dark-500">{c.pickOne}</p>
+                    )}
+                    {slot.alts.map((alt) => {
+                      const on = sel.selection.picks[slot.id] === alt.key
+                      return (
+                        <button
+                          key={alt.key}
+                          type="button"
+                          role={group ? 'radio' : 'checkbox'}
+                          aria-checked={on}
+                          onClick={() => toggle(slot.id, alt.key)}
+                          className="w-full flex items-start gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-dark-800/60 transition-colors"
+                        >
+                          {group ? <RadioDot on={on} /> : <CheckBox on={on} />}
+                          <span className={`min-w-0 flex-1 text-xs leading-5 ${on ? 'text-dark-50' : 'text-dark-400'}`}>
+                            {alt.text} <AltTag alt={alt} />
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </li>
+                )
+              })}
             </ul>
           ) : (
             <div className="space-y-2">
@@ -938,7 +961,7 @@ function ListCard({
                                 : 'border-dark-700 hover:border-dark-500'
                             }`}
                           >
-                            <OriginBadges origins={alt.origins} />
+                            <AltTag alt={alt} />
                             <span className={`mt-1 block text-xs leading-5 ${on ? 'text-dark-50' : 'text-dark-400'}`}>
                               {alt.text}
                             </span>
@@ -991,12 +1014,6 @@ function ListCard({
   )
 }
 
-/** Which version a pick stores: the item it keeps, or the new translation it writes. */
-function keptOrigin(alt: Alt): Origin {
-  if (alt.ref.from === 'source') return 'new'
-  return alt.origins.includes('own') ? 'own' : 'previous'
-}
-
 function ResultRow({ slotId, alt }: { slotId: string; alt: Alt }) {
   const controls = useDragControls()
   return (
@@ -1023,11 +1040,28 @@ function ResultRow({ slotId, alt }: { slotId: string; alt: Alt }) {
         </svg>
       </button>
       <span className="min-w-0 flex-1 text-xs leading-5 text-dark-100">
-        {/* Only the version that's actually kept — "yours", or the
-            translation it'll write — not every origin that shares its text. */}
-        {alt.text} <OriginBadges origins={[keptOrigin(alt)]} />
+        {alt.text} <AltTag alt={alt} />
       </span>
     </Reorder.Item>
+  )
+}
+
+/** A radio circle; clicking the picked one still takes the item out (see toggleAlt). */
+function RadioDot({ on }: { on: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border transition-colors ${
+        on ? 'border-[#d8ff3e]' : 'border-dark-500'
+      }`}
+    >
+      <motion.span
+        initial={false}
+        animate={{ scale: on ? 1 : 0 }}
+        transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+        className="h-2 w-2 rounded-full bg-[#d8ff3e]"
+      />
+    </span>
   )
 }
 
