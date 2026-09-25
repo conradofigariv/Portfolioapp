@@ -14,8 +14,10 @@ import type { JSONContent } from '@tiptap/core'
 import {
   AnimatePresence,
   MotionConfig,
+  Reorder,
   animate,
   motion,
+  useDragControls,
   useMotionValue,
   useTransform,
 } from 'framer-motion'
@@ -29,7 +31,23 @@ import {
   type ReviewView,
 } from '../lib/translate/translate-actions'
 import { runTranslation } from '../lib/translate/run-translation'
-import type { ListChoice } from '../lib/translate/plan'
+import {
+  buildSlots,
+  diffCounts,
+  finalRefs,
+  hasOwn,
+  isUnchanged,
+  modeFor,
+  presetSelection,
+  resultRows,
+  toggleAlt,
+  type Alt,
+  type ItemRef,
+  type Origin,
+  type Preset,
+  type Selection,
+  type Slot,
+} from '../lib/translate/list-merge'
 import type { ChunkFailure, TranslatedItem } from '../lib/translate/translate-batch'
 
 /**
@@ -85,7 +103,6 @@ type Phase =
   /** The preview itself failed — nothing ran. */
   | 'error'
 
-type Choice = ListChoice | 'keep'
 type Doc = { json: JSONContent; result: string }
 type ReviewList = ReviewView['lists'][number]
 
@@ -119,7 +136,10 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
   const [review, setReview] = useState<ReviewView | null>(null)
   const [docs, setDocs] = useState<Record<string, Doc>>({})
   const [accepted, setAccepted] = useState<Set<string>>(new Set())
-  const [choices, setChoices] = useState<Record<string, Choice>>({})
+  // Per list under review: its slots (built once the translations are in)
+  // and the owner's current picks — see list-merge.ts.
+  const [slotsByList, setSlotsByList] = useState<Record<string, Slot[]>>({})
+  const [selections, setSelections] = useState<Record<string, ListSel>>({})
 
   // Read only inside the loop and the Stop handler, never during render.
   const stopRef = useRef(false)
@@ -299,31 +319,31 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
 
     // Defaults: every stale field that got a translation is ticked (the owner
     // edited the source, so updating is the likely intent — and nothing is
-    // written until Apply anyway). A list starts on "keep", except an aligned
-    // list whose only differences are *edited* items: there "update" can't
-    // add anything unexpected, it only refreshes lines that were translated
-    // before. Anything that adds, replaces or removes items waits for a click.
+    // written until Apply anyway). Every list starts on the "recommended"
+    // picks — the owner's own items plus a translation of whatever they don't
+    // have yet (their explicit choice when this was designed) — which they can
+    // switch with a preset, adjust item by item, or set to "leave as is".
     setAccepted(new Set(view.fields.filter((f) => collected[f.blockKey]).map((f) => f.blockKey)))
-    const initial: Record<string, Choice> = {}
+    const slotMap: Record<string, Slot[]> = {}
+    const initial: Record<string, ListSel> = {}
     for (const list of view.lists) {
-      const onlyEdits = list.source.every((item) => item.status !== 'new')
-      initial[list.prefix] =
-        list.choices.includes('sync') && onlyEdits && canApply(list, 'sync', collected) ? 'sync' : 'keep'
+      const slots = buildSlots(list, translatedTexts(list, collected))
+      slotMap[list.prefix] = slots
+      initial[list.prefix] = { skip: false, selection: presetSelection(slots, 'recommended') }
     }
-    setChoices(initial)
+    setSlotsByList(slotMap)
+    setSelections(initial)
     setPhase('review')
   }
 
   async function apply() {
     if (!review) return
     setPhase('applying')
-    const lists = review.lists
-      .map((list) => ({ prefix: list.prefix, choice: choices[list.prefix] ?? 'keep' }))
-      .filter((entry): entry is { prefix: string; choice: ListChoice } => entry.choice !== 'keep')
+    const lists = changedLists()
     const needed = new Set<string>([...accepted])
-    for (const { prefix, choice } of lists) {
+    for (const { prefix, items } of lists) {
       const list = review.lists.find((l) => l.prefix === prefix)!
-      for (const key of keysFor(list, choice)) needed.add(key)
+      for (const key of neededKeys(list, items)) needed.add(key)
     }
     const result = await applyTranslationReview({
       from,
@@ -342,13 +362,23 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
     finish(failures.length > 0 || result.failures.length > 0 ? 'partial' : 'done')
   }
 
+  /** The lists whose final picks differ from what's on the page — the only ones sent. */
+  function changedLists(): { prefix: string; items: ItemRef[] }[] {
+    if (!review) return []
+    return review.lists.flatMap((list) => {
+      const sel = selections[list.prefix]
+      if (!sel || sel.skip) return []
+      const items = finalRefs(slotsByList[list.prefix] ?? [], sel.selection)
+      return isUnchanged(list, items) ? [] : [{ prefix: list.prefix, items }]
+    })
+  }
+
   const c = uiT.translate
   const nothingToDo = phase === 'ready' && counts !== null && counts.missing === 0 && counts.review === 0
   const canStart = phase === 'ready' && counts !== null && !nothingToDo
   const isSummary = phase === 'done' || phase === 'partial' || phase === 'stopped' || phase === 'failed'
   const bodyKey = isSummary ? 'summary' : phase
-  const changes =
-    accepted.size + Object.values(choices).filter((choice) => choice !== 'keep').length
+  const changes = phase === 'review' ? accepted.size + changedLists().length : 0
 
   if (!mounted) return null
 
@@ -376,7 +406,11 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
               role="dialog"
               aria-modal="true"
               aria-label={c.title}
-              className="relative w-full max-w-md max-h-[88vh] overflow-y-auto rounded-2xl border border-dark-700/80 bg-dark-900 shadow-2xl"
+              // Wider only while reviewing: pairs of long lines side by side
+              // need the room; every other step reads better narrow.
+              className={`relative w-full max-h-[88vh] overflow-y-auto rounded-2xl border border-dark-700/80 bg-dark-900 shadow-2xl transition-[max-width] duration-300 ${
+                phase === 'review' ? 'max-w-2xl' : 'max-w-md'
+              }`}
             >
               <div className="flex items-center justify-between gap-4 px-5 pt-5">
                 <div className="flex items-center gap-2.5">
@@ -500,8 +534,9 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
                               return next
                             })
                           }
-                          choices={choices}
-                          onChoose={(prefix, choice) => setChoices((prev) => ({ ...prev, [prefix]: choice }))}
+                          slotsByList={slotsByList}
+                          selections={selections}
+                          onSelect={(prefix, next) => setSelections((prev) => ({ ...prev, [prefix]: next }))}
                         />
                       )}
 
@@ -603,72 +638,27 @@ export default function TranslatePanel({ open, onClose }: { open: boolean; onClo
 /* ------------------------------------------------------------------------ */
 /* Review                                                                     */
 
-/** The source fields a list choice writes — mirrors the server's own rule. */
-function keysFor(list: ReviewList, choice: Choice): string[] {
-  if (choice === 'keep' || choice === 'dedupe') return []
-  return list.source.filter((item) => choice === 'replace' || item.status !== 'shared').flatMap((item) => item.keys)
-}
+type ListSel = { selection: Selection; skip: boolean }
 
-/** Whether every translation a choice needs actually came back. */
-function canApply(list: ReviewList, choice: Choice, docs: Record<string, Doc>): boolean {
-  return keysFor(list, choice).every((key) => docs[key])
-}
-
-type Row = {
-  key: string
-  text: string
-  state: 'kept' | 'removed' | 'added' | 'changed'
-  before?: string
-  /** A target item that came from an earlier translation, in a list that also has the owner's own. */
-  copy?: boolean
-}
-
-/**
- * What the list would look like under `choice`, row by row — the animated
- * preview. Row keys are stable per item (`t-<id>` for what's in the target
- * now, `s-<id>` for what a choice brings in), so switching choice animates
- * each row from one state to the next instead of redrawing the list.
- */
-function resultRows(list: ReviewList, choice: Choice, docs: Record<string, Doc>): Row[] {
-  const translated = (item: ReviewList['source'][number]) =>
-    item.keys
-      .map((key) => docs[key]?.result)
-      .filter(Boolean)
-      .join(' — ')
-  const sourceById = new Map(list.source.map((item) => [item.itemId, item]))
-  // Only worth pointing out when the list mixes both — in an aligned list
-  // every item is a "copy", and the tag would just be noise.
-  const mixed = list.choices.includes('dedupe')
-  const target = (state: Row['state'] = 'kept') =>
-    list.target.map((item) => ({ key: `t-${item.itemId}`, text: item.text, state, copy: mixed && item.shared }))
-
-  if (choice === 'keep') return target()
-  if (choice === 'replace') {
-    return [
-      ...target('removed'),
-      ...list.source.map((item) => ({ key: `s-${item.itemId}`, text: translated(item), state: 'added' as const })),
-    ]
+/** A source item's new translation, as one line of text — or none if any field didn't come back. */
+function translatedTexts(list: ReviewList, docs: Record<string, Doc>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const item of list.source) {
+    if (item.keys.length > 0 && item.keys.every((key) => docs[key])) {
+      out[item.itemId] = item.keys.map((key) => docs[key].result).join(' — ')
+    }
   }
-  if (choice === 'dedupe') {
-    return list.target.map((item) => ({
-      key: `t-${item.itemId}`,
-      text: item.text,
-      state: item.shared ? ('removed' as const) : ('kept' as const),
-      copy: item.shared,
-    }))
-  }
-  // sync
-  return [
-    ...list.target.map((item) => {
-      const source = sourceById.get(item.itemId)
-      return source?.status === 'changed'
-        ? { key: `t-${item.itemId}`, text: translated(source), state: 'changed' as const, before: item.text }
-        : { key: `t-${item.itemId}`, text: item.text, state: 'kept' as const }
-    }),
-    ...list.source
-      .filter((item) => item.status === 'new')
-      .map((item) => ({ key: `s-${item.itemId}`, text: translated(item), state: 'added' as const })),
-  ]
+  return out
+}
+
+/** The source fields a list's final sequence writes — what `apply` must send translations for. */
+function neededKeys(list: ReviewList, refs: ItemRef[]): string[] {
+  const byId = new Map(list.source.map((item) => [item.itemId, item]))
+  return refs.filter((ref) => ref.from === 'source').flatMap((ref) => byId.get(ref.itemId)?.keys ?? [])
+}
+
+function sameRefs(a: ItemRef[], b: ItemRef[]): boolean {
+  return a.length === b.length && a.every((ref, i) => ref.from === b[i].from && ref.itemId === b[i].itemId)
 }
 
 function ReviewStep({
@@ -678,8 +668,9 @@ function ReviewStep({
   target,
   accepted,
   onToggle,
-  choices,
-  onChoose,
+  slotsByList,
+  selections,
+  onSelect,
 }: {
   review: ReviewView
   docs: Record<string, Doc>
@@ -687,8 +678,9 @@ function ReviewStep({
   target: string
   accepted: Set<string>
   onToggle: (blockKey: string) => void
-  choices: Record<string, Choice>
-  onChoose: (prefix: string, choice: Choice) => void
+  slotsByList: Record<string, Slot[]>
+  selections: Record<string, ListSel>
+  onSelect: (prefix: string, next: ListSel) => void
 }) {
   const { uiT } = useLang()
   const c = uiT.translate
@@ -701,18 +693,9 @@ function ReviewStep({
         <p className="text-base font-medium text-dark-50">{c.reviewTitle}</p>
         <p className="mt-1 text-xs text-dark-500 leading-relaxed">{c.reviewIntro(target)}</p>
         {review.lists.length > 0 && (
-          // The same three marks the list previews use, spelled out once.
-          <p className="mt-2.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-dark-500">
-            <span>
-              <span className="text-[#d8ff3e]">+</span> {c.legendAdded}
-            </span>
-            <span>
-              <span className="text-red-400/80">−</span> {c.legendRemoved}
-            </span>
-            <span>
-              <span className="text-[#d8ff3e]">~</span> {c.legendChanged}
-            </span>
-          </p>
+          // The origin tags, explained once — each row then carries only the
+          // short word ("Yours", "Previous", "New").
+          <p className="mt-2 text-[11px] text-dark-500 leading-relaxed">{c.originsLegend}</p>
         )}
       </div>
 
@@ -760,154 +743,308 @@ function ReviewStep({
           )
         })}
 
-        {review.lists.map((list) => (
-          <motion.div
-            key={list.prefix}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={stagger()}
-          >
-            <ListCard
-              list={list}
-              docs={docs}
-              source={source}
-              choice={choices[list.prefix] ?? 'keep'}
-              onChoose={onChoose}
-            />
-          </motion.div>
-        ))}
+        {review.lists.map((list) => {
+          const slots = slotsByList[list.prefix] ?? []
+          const sel = selections[list.prefix]
+          if (!sel) return null
+          return (
+            <motion.div
+              key={list.prefix}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={stagger()}
+            >
+              <ListCard
+                list={list}
+                slots={slots}
+                sel={sel}
+                source={source}
+                onChange={(next) => onSelect(list.prefix, next)}
+              />
+            </motion.div>
+          )
+        })}
       </div>
     </div>
   )
 }
 
+const ORIGIN_STYLE: Record<Origin, string> = {
+  own: 'border-dark-500 text-dark-200',
+  previous: 'border-amber-400/30 text-amber-200/80',
+  new: 'border-[#d8ff3e]/40 text-[#d8ff3e]',
+}
+
+function OriginBadges({ origins }: { origins: Origin[] }) {
+  const { uiT } = useLang()
+  const c = uiT.translate
+  return (
+    <span className="inline-flex flex-wrap gap-1 align-middle">
+      {origins.map((origin) => (
+        <span
+          key={origin}
+          className={`inline-block rounded border px-1 text-[9px] leading-[14px] uppercase tracking-wider whitespace-nowrap ${ORIGIN_STYLE[origin]}`}
+        >
+          {c.origins[origin]}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+/**
+ * One list under review: presets, the picker (a checklist for short items,
+ * pairs for long ones — see list-merge.ts) and the result, draggable.
+ */
 function ListCard({
   list,
-  docs,
+  slots,
+  sel,
   source,
-  choice,
-  onChoose,
+  onChange,
 }: {
   list: ReviewList
-  docs: Record<string, Doc>
+  slots: Slot[]
+  sel: ListSel
   source: string
-  choice: Choice
-  onChoose: (prefix: string, choice: Choice) => void
+  onChange: (next: ListSel) => void
 }) {
   const { uiT } = useLang()
   const c = uiT.translate
-  const rows = resultRows(list, choice, docs)
-  const options: Choice[] = ['keep', ...list.choices]
-  const hasCopies = list.choices.includes('dedupe')
+  const mode = modeFor(list.kind)
   const title = [c.sections[list.section] ?? list.section, list.parentTitle].filter(Boolean).join(' · ')
+  const refs = finalRefs(slots, sel.selection)
+  const unchanged = sel.skip || isUnchanged(list, refs)
+  const { added, removed } = diffCounts(list, refs)
+  const current = [...list.target].sort((a, b) => a.sortOrder - b.sortOrder)
+  const sameItems =
+    refs.length === current.length &&
+    refs.every((ref) => ref.from === 'target') &&
+    new Set(refs.map((r) => r.itemId)).size === new Set(current.map((t) => t.itemId)).size &&
+    refs.every((ref) => current.some((t) => t.itemId === ref.itemId))
+
+  const presets: Preset[] = hasOwn(slots) ? ['recommended', 'mine', 'translated'] : ['recommended', 'translated']
+  const activePreset = sel.skip
+    ? 'skip'
+    : presets.find((preset) => sameRefs(finalRefs(slots, presetSelection(slots, preset)), refs)) ?? null
+
+  // The picker lists slots in their natural place (page order, then new ones),
+  // not in the result's order — dragging the result mustn't shuffle the picker.
+  const pickerSlots = [...slots].sort((a, b) => a.anchor - b.anchor || (a.sourceIndex ?? 1e9) - (b.sourceIndex ?? 1e9))
+  const sourceSorted = [...list.source].sort((a, b) => a.sortOrder - b.sortOrder)
+  const rows = resultRows(slots, sel.selection)
+  const byId = new Map(rows.map((row) => [row.slotId, row]))
+
+  const toggle = (slotId: string, altKey: string) =>
+    onChange({ skip: false, selection: toggleAlt(slots, sel.selection, slotId, altKey) })
 
   return (
     <div
       className={`rounded-xl border px-3.5 py-3 space-y-3 transition-colors ${
-        choice === 'keep' ? 'border-dark-700/70' : 'border-[#d8ff3e]/30 bg-[#d8ff3e]/[0.03]'
+        unchanged ? 'border-dark-700/70' : 'border-[#d8ff3e]/30 bg-[#d8ff3e]/[0.03]'
       }`}
     >
       <div className="flex items-baseline justify-between gap-3">
         <p className="text-sm text-dark-100 truncate">{title}</p>
         <p className="shrink-0 text-[11px] uppercase tracking-wider text-dark-500">{c.kinds[list.kind] ?? list.kind}</p>
       </div>
-      {hasCopies && <p className="text-[11px] text-amber-200/70 -mt-1.5">{c.copiesHint}</p>}
 
-      <div className="flex flex-wrap gap-1 rounded-full border border-dark-700 p-0.5 w-fit max-w-full">
-        {options.map((option) => {
-          const active = option === choice
-          const available = canApply(list, option, docs)
+      {/* Presets: one click fills the picker, then fine-tune by hand. The
+          active one is highlighted only while the picks still match it. */}
+      <div className="flex flex-wrap gap-1">
+        {[...presets, 'skip' as const].map((preset) => {
+          const active = activePreset === preset
           return (
             <button
-              key={option}
+              key={preset}
               type="button"
-              disabled={!available}
-              onClick={() => onChoose(list.prefix, option)}
               aria-pressed={active}
-              className={`relative text-[11px] px-2.5 py-1 rounded-full transition-colors disabled:opacity-30 ${
-                active ? 'text-dark-900 font-semibold' : 'text-dark-400 hover:text-dark-100'
+              onClick={() =>
+                preset === 'skip'
+                  ? onChange({ ...sel, skip: true })
+                  : onChange({ skip: false, selection: presetSelection(slots, preset) })
+              }
+              className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors ${
+                active
+                  ? 'bg-dark-50 text-dark-900 border-dark-50 font-semibold'
+                  : 'border-dark-700 text-dark-400 hover:text-dark-100 hover:border-dark-500'
               }`}
             >
-              {active && (
-                <motion.span
-                  layoutId={`choice-${list.prefix}`}
-                  className="absolute inset-0 rounded-full bg-dark-50"
-                  transition={{ type: 'spring', stiffness: 500, damping: 38 }}
-                />
-              )}
-              <span className="relative">{c.choices[option]}</span>
+              {c.presets[preset]}
             </button>
           )
         })}
       </div>
 
-      {/* What the selected choice does, in words — the preview below shows
-          the result, this says the rule. Reported as "lindo pero no muy claro
-          cómo funciona" with only the preview to go on. */}
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.p
-          key={choice}
-          initial={{ opacity: 0, y: 3 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -3 }}
-          transition={{ duration: 0.15 }}
-          className="-mt-1 text-[11px] text-dark-400 leading-relaxed"
-        >
-          {c.choiceHelp(choice, source)}
-        </motion.p>
-      </AnimatePresence>
+      <Collapse open={sel.skip}>
+        <p className="text-[11px] text-dark-400">{c.skipped}</p>
+      </Collapse>
 
-      <ul className="space-y-1">
-        <AnimatePresence initial={false}>
-          {rows.map((row) => (
-            <motion.li
-              key={row.key}
-              layout="position"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.25, ease: EASE }}
-              className="overflow-hidden"
-            >
-              <div className="flex items-start gap-2 py-0.5">
-                <span
-                  aria-hidden
-                  className={`w-3 shrink-0 text-center text-xs leading-5 ${
-                    row.state === 'added' || row.state === 'changed'
-                      ? 'text-[#d8ff3e]'
-                      : row.state === 'removed'
-                        ? 'text-red-400/80'
-                        : 'text-dark-600'
-                  }`}
-                >
-                  {row.state === 'added' ? '+' : row.state === 'removed' ? '−' : row.state === 'changed' ? '~' : '·'}
-                </span>
-                <div className="min-w-0">
-                  {row.before && <p className="text-[11px] text-dark-500 line-through line-clamp-1">{row.before}</p>}
-                  <motion.p
-                    animate={{ opacity: row.state === 'removed' ? 0.45 : 1 }}
-                    className={`text-xs leading-5 line-clamp-2 ${
-                      row.state === 'removed'
-                        ? 'text-dark-400 line-through decoration-red-400/50'
-                        : row.state === 'kept'
-                          ? 'text-dark-300'
-                          : 'text-dark-50'
-                    }`}
-                  >
-                    {row.copy && (
-                      <span className="mr-1.5 inline-block align-[1px] rounded border border-amber-400/30 px-1 text-[9px] uppercase tracking-wider text-amber-200/80 no-underline">
-                        {c.copyTag}
-                      </span>
+      <Collapse open={!sel.skip}>
+        <div className="space-y-3">
+          <p className="text-[11px] text-dark-400 leading-relaxed">
+            {mode === 'check' ? c.pickHintCheck : c.pickHintPairs(source)}
+          </p>
+
+          {mode === 'check' ? (
+            <ul className="space-y-0.5">
+              {pickerSlots.map((slot) => (
+                <li key={slot.id} className={slot.alts.length > 1 ? 'border-l border-dark-700 pl-2 space-y-0.5' : ''}>
+                  {slot.alts.map((alt) => {
+                    const on = sel.selection.picks[slot.id] === alt.key
+                    return (
+                      <button
+                        key={alt.key}
+                        type="button"
+                        role="checkbox"
+                        aria-checked={on}
+                        onClick={() => toggle(slot.id, alt.key)}
+                        className="w-full flex items-start gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-dark-800/60 transition-colors"
+                      >
+                        <CheckBox on={on} />
+                        <span className={`min-w-0 flex-1 text-xs leading-5 ${on ? 'text-dark-50' : 'text-dark-400'}`}>
+                          {alt.text} <OriginBadges origins={alt.origins} />
+                        </span>
+                      </button>
+                    )
+                  })}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="space-y-2">
+              {pickerSlots.map((slot) => {
+                const original = slot.sourceIndex !== null ? sourceSorted[slot.sourceIndex]?.text : null
+                return (
+                  <div key={slot.id} className="rounded-lg border border-dark-800 p-2 space-y-1.5">
+                    {original && (
+                      <p className="px-1 text-[10px] text-dark-500 line-clamp-2">
+                        <span className="uppercase tracking-wider">{source}</span> · {original}
+                      </p>
                     )}
-                    {row.text}
-                  </motion.p>
-                </div>
-              </div>
-            </motion.li>
-          ))}
-        </AnimatePresence>
-      </ul>
+                    <div className="grid gap-1.5 sm:grid-cols-2">
+                      {slot.alts.map((alt) => {
+                        const on = sel.selection.picks[slot.id] === alt.key
+                        return (
+                          <button
+                            key={alt.key}
+                            type="button"
+                            role="radio"
+                            aria-checked={on}
+                            onClick={() => toggle(slot.id, alt.key)}
+                            className={`rounded-md border px-2.5 py-2 text-left transition-colors ${
+                              on
+                                ? 'border-[#d8ff3e]/60 bg-[#d8ff3e]/[0.06]'
+                                : 'border-dark-700 hover:border-dark-500'
+                            }`}
+                          >
+                            <OriginBadges origins={alt.origins} />
+                            <span className={`mt-1 block text-xs leading-5 ${on ? 'text-dark-50' : 'text-dark-400'}`}>
+                              {alt.text}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* The result: exactly what the list will be, in order. Dragged
+              by its handle only, so scrolling the panel on a phone still
+              scrolls rather than grabbing a row. */}
+          <div className="rounded-lg bg-dark-800/40 px-2.5 py-2">
+            <div className="flex items-baseline justify-between gap-2 pb-1.5">
+              <p className="text-[11px] font-medium text-dark-200">
+                {c.resultTitle} · {rows.length}
+              </p>
+              <p className={`text-[11px] ${unchanged ? 'text-dark-500' : 'text-[#d8ff3e]/80'}`}>
+                {c.diff(added, removed, !unchanged && added === 0 && removed === 0 && sameItems)}
+              </p>
+            </div>
+            {rows.length === 0 ? (
+              <p className="py-1 text-[11px] text-amber-200/70">{c.emptyResult}</p>
+            ) : (
+              <>
+                <Reorder.Group
+                  axis="y"
+                  values={sel.selection.order}
+                  onReorder={(order: string[]) => onChange({ skip: false, selection: { ...sel.selection, order } })}
+                  // select-none: a drag that strays off the handle must never
+                  // turn into a text selection across the whole panel.
+                  className="space-y-0.5 select-none"
+                >
+                  {sel.selection.order.map((slotId) => {
+                    const row = byId.get(slotId)
+                    return row ? <ResultRow key={slotId} slotId={slotId} alt={row.alt} /> : null
+                  })}
+                </Reorder.Group>
+                {rows.length > 1 && <p className="pt-1 text-[10px] text-dark-600">{c.dragHint}</p>}
+              </>
+            )}
+          </div>
+        </div>
+      </Collapse>
     </div>
+  )
+}
+
+/** Which version a pick stores: the item it keeps, or the new translation it writes. */
+function keptOrigin(alt: Alt): Origin {
+  if (alt.ref.from === 'source') return 'new'
+  return alt.origins.includes('own') ? 'own' : 'previous'
+}
+
+function ResultRow({ slotId, alt }: { slotId: string; alt: Alt }) {
+  const controls = useDragControls()
+  return (
+    <Reorder.Item
+      value={slotId}
+      dragListener={false}
+      dragControls={controls}
+      className="flex items-start gap-2 rounded-md bg-dark-900/60 px-1.5 py-1"
+      whileDrag={{ scale: 1.02, boxShadow: '0 8px 20px rgba(0,0,0,0.45)' }}
+    >
+      <button
+        type="button"
+        aria-label="Reorder"
+        onPointerDown={(e) => controls.start(e)}
+        className="mt-0.5 shrink-0 cursor-grab touch-none text-dark-600 hover:text-dark-300 active:cursor-grabbing"
+      >
+        <svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor" aria-hidden>
+          <circle cx="3" cy="3" r="1.2" />
+          <circle cx="9" cy="3" r="1.2" />
+          <circle cx="3" cy="7" r="1.2" />
+          <circle cx="9" cy="7" r="1.2" />
+          <circle cx="3" cy="11" r="1.2" />
+          <circle cx="9" cy="11" r="1.2" />
+        </svg>
+      </button>
+      <span className="min-w-0 flex-1 text-xs leading-5 text-dark-100">
+        {/* Only the version that's actually kept — "yours", or the
+            translation it'll write — not every origin that shares its text. */}
+        {alt.text} <OriginBadges origins={[keptOrigin(alt)]} />
+      </span>
+    </Reorder.Item>
+  )
+}
+
+function CheckBox({ on }: { on: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded border transition-colors ${
+        on ? 'border-[#d8ff3e] bg-[#d8ff3e] text-[#08080a]' : 'border-dark-500'
+      }`}
+    >
+      {on && (
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5">
+          <path d="M5 12.5l4.5 4.5L19 7.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+    </span>
   )
 }
 
