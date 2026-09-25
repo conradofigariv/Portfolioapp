@@ -111,8 +111,9 @@ export const translations = {
         translated: 'All translated',
         skip: 'Leave as is',
       } as Record<string, string>,
-      origins: { own: 'Yours', previous: 'Previous', new: 'New' } as Record<string, string>,
-      originsLegend: 'Yours = you wrote it · Previous = a translation already on the page · New = translated just now',
+      tags: { current: 'Current', new: 'New' },
+      tagsLegend: 'Current = on your page today · New = brought in by this translation',
+      pickOne: 'Pick one',
       pickHintCheck: 'Tick what should stay. Identical items are shown once.',
       pickHintPairs: (source: string): string => `Pick one version of each item — the ${source} original is on top.`,
       resultTitle: 'Result',
@@ -511,8 +512,9 @@ export const translations = {
         translated: 'Todo traducido',
         skip: 'No tocar',
       } as Record<string, string>,
-      origins: { own: 'Tuyo', previous: 'Anterior', new: 'Nueva' } as Record<string, string>,
-      originsLegend: 'Tuyo = lo escribiste vos · Anterior = traducción que ya estaba · Nueva = traducida recién',
+      tags: { current: 'Actual', new: 'Nueva' },
+      tagsLegend: 'Actual = está hoy en tu página · Nueva = la trae esta traducción',
+      pickOne: 'Elegí una',
       pickHintCheck: 'Tildá lo que querés que quede. Lo que dice lo mismo aparece una sola vez.',
       pickHintPairs: (source: string): string => `Elegí una versión de cada ítem — arriba, el original en ${source}.`,
       resultTitle: 'Así queda',
@@ -524,7 +526,10 @@ export const translations = {
           ? reordered
             ? 'Solo cambia el orden'
             : 'Sin cambios'
-          : [added ? `+${added} nuevos` : '', removed ? `−${removed} se quitan` : ''].filter(Boolean).join(' · '),
+          : [
+              added ? `+${added} ${added === 1 ? 'nuevo' : 'nuevos'}` : '',
+              removed ? `−${removed} ${removed === 1 ? 'se quita' : 'se quitan'}` : '',
+            ].filter(Boolean).join(' · '),
       kinds: {
         narrative: 'Líneas',
         tags: 'Tags',
