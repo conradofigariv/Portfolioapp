@@ -6,6 +6,7 @@ import { loadPortfolio } from '../lib/portfolio-db'
 import { adoptDeploymentMedia } from '../lib/deployment-owner'
 import { TOUR_STEPS } from '../lib/onboarding-tour'
 import { seedStarterBlocks } from '../lib/starter-blocks'
+import { adoptGoogleAvatar } from '../lib/google-avatar'
 import { loadUsernameConfirmed, resolveUsernameRedirect } from '../lib/username-db'
 
 // Applies to every server action used on this page (per Next's own docs), and
@@ -76,7 +77,17 @@ export default async function UserPortfolioPage({
       content: loaded.content,
       blockCount: Object.keys(loaded.blocks).length,
     })
-    if (adopted || seeded) portfolio = (await loadPortfolio(supabase, username)) ?? loaded
+    // The same first open also gives the owner their Google photo as the
+    // portrait — only then, so removing it later is never undone.
+    const avatar = seeded
+      ? await adoptGoogleAvatar(supabase, {
+          portfolioId: loaded.portfolioId,
+          userId: loaded.ownerId,
+          avatarUrl: auth.user?.user_metadata?.avatar_url ?? auth.user?.user_metadata?.picture,
+          alt: loaded.content.en.hero.name,
+        })
+      : false
+    if (adopted || seeded || avatar) portfolio = (await loadPortfolio(supabase, username)) ?? loaded
   }
 
   // Asked once, the first time a new owner opens their page — see UsernamePicker.
