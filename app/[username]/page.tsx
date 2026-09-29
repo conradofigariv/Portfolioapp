@@ -1,4 +1,5 @@
 import { notFound, redirect } from 'next/navigation'
+import { cookies } from 'next/headers'
 import type { Metadata } from 'next'
 import PortfolioShell from '../components/PortfolioShell'
 import { createClient } from '../lib/supabase/server'
@@ -8,6 +9,8 @@ import { TOUR_STEPS } from '../lib/onboarding-tour'
 import { seedStarterBlocks } from '../lib/starter-blocks'
 import { adoptGoogleAvatar } from '../lib/google-avatar'
 import { loadUsernameConfirmed, resolveUsernameRedirect } from '../lib/username-db'
+import { isUntouchedPortfolio } from '../lib/starter-detect'
+import { isTestAccount, startCookieName } from '../lib/test-account'
 
 // Applies to every server action used on this page (per Next's own docs), and
 // is set for exactly one of them: `translateChunk`, which makes a blocking
@@ -93,6 +96,19 @@ export default async function UserPortfolioPage({
   // Asked once, the first time a new owner opens their page — see UsernamePicker.
   const askUsername = isOwner && !previewing && !(await loadUsernameConfirmed(supabase, loaded.ownerId))
 
+  // "How do you want to start?" — after the address, before the tour, only
+  // while nothing has been written yet and the owner hasn't answered on this
+  // device. See StartScreen.tsx.
+  const cookie = startCookieName(loaded.ownerId)
+  const startScreen =
+    isOwner &&
+    !previewing &&
+    !askUsername &&
+    !(await cookies()).get(cookie) &&
+    isUntouchedPortfolio(portfolio.blocks, portfolio.media)
+      ? { cookie }
+      : null
+
   return (
     <PortfolioShell
       portfolio={portfolio}
@@ -108,6 +124,8 @@ export default async function UserPortfolioPage({
       showTour={isOwner && !previewing && !askUsername && portfolio.tourStep < TOUR_STEPS.length}
       askUsername={askUsername}
       initialTourStep={portfolio.tourStep}
+      startScreen={startScreen}
+      testAccount={isOwner && isTestAccount(auth.user)}
     />
   )
 }

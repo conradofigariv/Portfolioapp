@@ -7,6 +7,8 @@ import { useLang } from '../context/LanguageContext'
 import { savePortfolio } from '../lib/portfolio-actions'
 import TranslatePanel from './TranslatePanel'
 import ImportCvPanel from './ImportCvPanel'
+import StartScreen from './StartScreen'
+import { resetTestAccount } from '../lib/test-account-actions'
 import UsernamePicker from './UsernamePicker'
 
 // How long the "Saved"/"Guardado" flash stays up after a block autosaves —
@@ -16,14 +18,28 @@ const FLASH_MS = 1600
 
 // Floats above the portfolio while its owner is editing. Everyone else never
 // renders this, and the page they see is unchanged.
-export default function EditBar({ username, askUsername = false }: { username: string; askUsername?: boolean }) {
-  const { editing, dirty, draft, markSaved, lastBlockSavedAt, blockSaving, uiLang, uiT } = useLang()
+export default function EditBar({
+  username,
+  askUsername = false,
+  startScreen = null,
+  testAccount = false,
+}: {
+  username: string
+  askUsername?: boolean
+  startScreen?: { cookie: string } | null
+  testAccount?: boolean
+}) {
+  const { editing, dirty, draft, markSaved, lastBlockSavedAt, blockSaving, uiLang, uiT, tour } = useLang()
   const [state, setState] = useState<'idle' | 'saving' | 'error'>('idle')
   const [error, setError] = useState<string | null>(null)
   const [justSaved, setJustSaved] = useState(false)
   const [seenSavedAt, setSeenSavedAt] = useState(lastBlockSavedAt)
   const [translateOpen, setTranslateOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  // Opened from the start screen's "With my CV": the file chooser comes up by itself.
+  const [importAutoPick, setImportAutoPick] = useState(false)
+  const [startOpen, setStartOpen] = useState(!!startScreen)
+  const [resetting, setResetting] = useState(false)
   // A new owner is asked for their address once, as soon as the page opens;
   // after that "Link" opens the same picker to change it.
   const [pickerMode, setPickerMode] = useState<'first' | 'change'>(askUsername ? 'first' : 'change')
@@ -63,6 +79,18 @@ export default function EditBar({ username, askUsername = false }: { username: s
 
   if (!editing) return null
 
+  async function onReset() {
+    if (!window.confirm(uiT.testAccount.confirm)) return
+    setResetting(true)
+    const result = await resetTestAccount()
+    if (result.ok) {
+      window.location.reload()
+      return
+    }
+    setResetting(false)
+    setError(result.error)
+  }
+
   async function onSave() {
     setState('saving')
     setError(null)
@@ -96,9 +124,24 @@ export default function EditBar({ username, askUsername = false }: { username: s
 
         {/* Owner-only, so its label follows `uiLang` via uiT, not the content
             language toggle — see "App language vs. content language". */}
+        {testAccount && (
+          <button
+            type="button"
+            onClick={() => void onReset()}
+            disabled={resetting}
+            title="Test accounts only"
+            className="rounded-full border border-amber-400/40 px-2.5 py-0.5 text-xs text-amber-200/90 hover:border-amber-300 hover:text-amber-100 transition disabled:opacity-60"
+          >
+            {resetting ? uiT.testAccount.resetting : uiT.testAccount.reset}
+          </button>
+        )}
+
         <button
           type="button"
-          onClick={() => setImportOpen(true)}
+          onClick={() => {
+            setImportAutoPick(false)
+            setImportOpen(true)
+          }}
           className="text-xs text-dark-300 hover:text-dark-50 transition"
         >
           {uiT.importCv.open}
@@ -172,7 +215,30 @@ export default function EditBar({ username, askUsername = false }: { username: s
       </div>
 
       <TranslatePanel open={translateOpen} onClose={() => setTranslateOpen(false)} />
-      <ImportCvPanel open={importOpen} onClose={() => setImportOpen(false)} />
+      <ImportCvPanel
+        open={importOpen}
+        autoPick={importAutoPick}
+        onClose={() => {
+          setImportOpen(false)
+          // Coming from the start screen without importing: the tour starts now.
+          tour.release()
+        }}
+      />
+      {startScreen && (
+        <StartScreen
+          open={startOpen}
+          cookie={startScreen.cookie}
+          onChooseCv={() => {
+            setStartOpen(false)
+            setImportAutoPick(true)
+            setImportOpen(true)
+          }}
+          onChooseScratch={() => {
+            setStartOpen(false)
+            tour.release()
+          }}
+        />
+      )}
       <UsernamePicker
         open={pickerOpen}
         mode={pickerMode}

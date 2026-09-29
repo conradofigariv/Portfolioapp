@@ -23,12 +23,21 @@ const noopSubscribe = () => () => {}
  * `uiT`. The step-by-step tray that lets the owner switch cards on and off
  * comes later (step 9); this writes everything the CV has.
  */
-export default function ImportCvPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function ImportCvPanel({
+  open,
+  onClose,
+  autoPick = false,
+}: {
+  open: boolean
+  onClose: () => void
+  /** Opened from the start screen: bring the file chooser up straight away. */
+  autoPick?: boolean
+}) {
   const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false)
   if (!mounted) return null
   return createPortal(
     <MotionConfig reducedMotion="user">
-      <AnimatePresence>{open && <Dialog key="import-cv" onClose={onClose} />}</AnimatePresence>
+      <AnimatePresence>{open && <Dialog key="import-cv" onClose={onClose} autoPick={autoPick} />}</AnimatePresence>
     </MotionConfig>,
     document.body
   )
@@ -48,13 +57,21 @@ const SECTION_LABEL: Record<HideableSection, 'about' | 'projects' | 'skills' | '
   contact: 'contact',
 }
 
-function Dialog({ onClose }: { onClose: () => void }) {
+function Dialog({ onClose, autoPick }: { onClose: () => void; autoPick: boolean }) {
   const { uiT, dirty } = useLang()
   const c = uiT.importCv
   const [phase, setPhase] = useState<Phase>({ name: 'pick' })
   const [includeEmail, setIncludeEmail] = useState(false)
   const input = useRef<HTMLInputElement>(null)
   const busy = phase.name === 'uploading' || phase.name === 'reading' || phase.name === 'importing'
+
+  // Still inside the click that chose "With my CV", so the browser lets the
+  // chooser open without another click (where it doesn't, the button is there).
+  useEffect(() => {
+    if (autoPick && !dirty) input.current?.click()
+    // Once, on open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

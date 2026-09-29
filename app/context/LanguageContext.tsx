@@ -138,6 +138,9 @@ interface LanguageContextType {
     finish: () => void
     remember: boolean
     setRemember: (value: boolean) => void
+    // The "how do you want to start?" screen holds the tour back while it's
+    // up (see StartScreen.tsx); closing it lets the tour begin.
+    release: () => void
   }
 }
 
@@ -162,6 +165,7 @@ export function LanguageProvider({
   editing = false,
   showTour = false,
   initialTourStep = 0,
+  holdTour = false,
 }: {
   children: ReactNode
   portfolio?: Portfolio
@@ -173,6 +177,8 @@ export function LanguageProvider({
   // Which step to resume from, from a previous "Salir". Meaningless unless
   // showTour is also true.
   initialTourStep?: number
+  // The tour waits until `tour.release()` — the start screen is up first.
+  holdTour?: boolean
 }) {
   const [lang, setLang] = useState<Lang>(() => baseLangOf(portfolio.blocks))
 
@@ -294,13 +300,14 @@ export function LanguageProvider({
   // workaround OnboardingTour.tsx uses for its document.body access — that
   // rule only flags a synchronous call in the effect body itself.
   const [tourReady, setTourReady] = useState(false)
+  const [tourHeld, setTourHeld] = useState(holdTour)
   useEffect(() => {
-    if (!showTour) return
+    if (!showTour || tourHeld) return
     const timer = setTimeout(() => setTourReady(true), 2000)
     return () => clearTimeout(timer)
-  }, [showTour])
+  }, [showTour, tourHeld])
 
-  const tourActive = showTour && tourReady && !tourClosed
+  const tourActive = showTour && !tourHeld && tourReady && !tourClosed
   const isLastStep = stepIndex >= TOUR_STEPS.length - 1
 
   function tourNext() {
@@ -362,6 +369,7 @@ export function LanguageProvider({
           finish: tourFinish,
           remember,
           setRemember,
+          release: () => setTourHeld(false),
         },
       }}
     >

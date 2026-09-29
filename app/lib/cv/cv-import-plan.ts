@@ -1,9 +1,11 @@
 import type { JSONContent } from '@tiptap/core'
 import type { CvExtract } from './cv-schema'
-import type { HideableSection, Lang, PortfolioBlocks, PortfolioContent, PortfolioMedia, Project } from '../portfolio'
+import type { HideableSection, Lang, PortfolioContent, PortfolioMedia, Project } from '../portfolio'
 import { hiddenSectionsOf } from '../portfolio'
-import { starterContent } from '../starter-content'
-import { plainTextFromDoc, renderBlockHtml } from '../editor/render-html'
+import { renderBlockHtml } from '../editor/render-html'
+import { blockTextsFrom, isPlaceholder, type BlockTexts } from '../starter-detect'
+
+export { blockTextsFrom, type BlockTexts }
 
 /**
  * What importing a CV does to a portfolio, decided in one pure function so
@@ -45,8 +47,6 @@ export type BlockRow = {
   content_html: string
 }
 
-/** Every block's plain text, by key and language — all the planner needs of the stored blocks. */
-export type BlockTexts = Record<string, Partial<Record<Lang, string>>>
 
 export type CvImportSummary = {
   lang: Lang
@@ -87,46 +87,6 @@ const SECTION_TITLES = {
 } as const
 
 // ---------------------------------------------------------------- starter copy
-
-function normalize(text: string): string {
-  return text.normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase()
-}
-
-// Every string a new account starts with, in both languages. Built with a
-// marker for the name so the name-dependent ones ("© 2026 Ana") are left out:
-// the owner's own name is never starter copy.
-const MARK = '\u0001'
-const STARTER = (() => {
-  const set = new Set<string>()
-  const walk = (value: unknown) => {
-    if (typeof value === 'string') {
-      if (!value.includes(MARK)) set.add(normalize(value))
-    } else if (Array.isArray(value)) value.forEach(walk)
-    else if (value && typeof value === 'object') Object.values(value).forEach(walk)
-  }
-  const s = starterContent(MARK)
-  walk(s.en)
-  walk(s.es)
-  set.delete('')
-  return set
-})()
-
-/** Empty, starter copy, or a bare year (the starter project's year is the year it was created). */
-function isPlaceholder(text: string | undefined): boolean {
-  const t = normalize(text ?? '')
-  return !t || STARTER.has(t) || /^\d{4}$/.test(t)
-}
-
-export function blockTextsFrom(blocks: PortfolioBlocks): BlockTexts {
-  const out: BlockTexts = {}
-  for (const [key, byLang] of Object.entries(blocks)) {
-    for (const lang of LANGS) {
-      const block = byLang[lang]
-      if (block) (out[key] ??= {})[lang] = plainTextFromDoc(block.json)
-    }
-  }
-  return out
-}
 
 /** Every stored key under a prefix. */
 function keysUnder(texts: BlockTexts, prefix: string): string[] {
