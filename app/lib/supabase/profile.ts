@@ -1,6 +1,7 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js'
 import { slugifyUsername, withSuffix } from '../username'
 import { starterContent } from '../starter-content'
+import { isHeldByRedirect } from '../username-db'
 
 const UNIQUE_VIOLATION = '23505'
 const CHECK_VIOLATION = '23514' // reserved username or bad format
@@ -28,6 +29,9 @@ export async function ensureProfile(supabase: SupabaseClient, user: User) {
   const MAX_ATTEMPTS = 25
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const username = withSuffix(base, attempt)
+    // Someone who moved away from this address in the last 90 days still owns
+    // where it leads (migration 0018): try the next suffix instead.
+    if (await isHeldByRedirect(supabase, username)) continue
     const { error } = await supabase.from('profiles').insert({
       id: user.id,
       username,
