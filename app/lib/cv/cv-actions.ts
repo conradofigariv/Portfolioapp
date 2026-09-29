@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '../supabase/server'
 import { readCvBytes, type CvReadResult } from './read-cv'
 import { removePortfolioCv, setPortfolioCv } from './cv-store'
+import { executeCvImport, type CvImportResult } from './cv-import'
 
 const BUCKET = 'portfolio-media'
 
@@ -96,5 +97,30 @@ export async function removeCv(): Promise<{ ok: true } | { ok: false; error: str
     return removed
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Could not remove the CV.' }
+  }
+}
+
+/**
+ * Writes a CV the owner has just read (`readCv`) into their portfolio — see
+ * cv-import-plan.ts for what goes where and what's replaced. The email is
+ * published only when `includeEmail` is true (the owner ticks it).
+ */
+export async function importCv(cv: unknown, options: { includeEmail?: boolean } = {}): Promise<CvImportResult | { ok: false; error: 'not_signed_in' }> {
+  try {
+    const supabase = await createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return { ok: false, error: 'not_signed_in' }
+    const result = await executeCvImport(supabase, {
+      userId: user.id,
+      cv,
+      includeEmail: options?.includeEmail === true,
+      stamp: Date.now().toString(36),
+    })
+    if (result.ok) revalidatePath('/', 'layout')
+    return result
+  } catch (err) {
+    return { ok: false, error: 'failed', message: err instanceof Error ? err.message : undefined }
   }
 }

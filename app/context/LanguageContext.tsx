@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore, ReactNode } from 'react'
 import { translations, Lang } from '../lib/translations'
-import { Portfolio, PortfolioBlock, PortfolioBlocks, PortfolioContent, PortfolioMedia, defaultPortfolio } from '../lib/portfolio'
+import { Portfolio, PortfolioBlock, PortfolioBlocks, PortfolioContent, PortfolioMedia, baseLangOf, defaultPortfolio } from '../lib/portfolio'
 import { setAtPath } from '../lib/content-path'
 import { TOUR_STEPS } from '../lib/onboarding-tour'
 import { finishOnboardingTour, pauseOnboardingTour } from '../lib/portfolio-actions'
@@ -174,7 +174,7 @@ export function LanguageProvider({
   // showTour is also true.
   initialTourStep?: number
 }) {
-  const [lang, setLang] = useState<Lang>('en')
+  const [lang, setLang] = useState<Lang>(() => baseLangOf(portfolio.blocks))
 
   // uiLang: detected once from the browser, then persisted to localStorage —
   // completely separate from `lang` above (content language). `mounted`

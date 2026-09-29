@@ -1,5 +1,5 @@
 import type { JSONContent } from '@tiptap/core'
-import { translations, Lang } from './translations'
+import { translations, type Lang } from './translations'
 
 export type { Lang }
 
@@ -111,6 +111,24 @@ export type Portfolio = {
   media: PortfolioMedia
   content: Record<Lang, PortfolioContent>
   blocks: PortfolioBlocks
+}
+
+/**
+ * The language a portfolio opens in. English, unless the Spanish side has more
+ * than twice as many filled-in fields — a portfolio written (or imported from
+ * a CV) only in Spanish would otherwise open on an almost empty English page,
+ * for its owner and for every visitor. A fully bilingual portfolio has about
+ * as many fields in each and keeps opening in English. Pure and computed from
+ * props, so the server and the browser agree on it.
+ */
+export function baseLangOf(blocks: PortfolioBlocks): Lang {
+  const filled = { en: 0, es: 0 }
+  for (const byLang of Object.values(blocks)) {
+    for (const lang of ['en', 'es'] as const) {
+      if (/\S/.test((byLang[lang]?.html ?? '').replace(/<[^>]*>/g, ''))) filled[lang]++
+    }
+  }
+  return filled.es > 2 * filled.en ? 'es' : 'en'
 }
 
 export const projectId = (index: number) => `project-${index}`
