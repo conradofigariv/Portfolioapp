@@ -3,12 +3,18 @@
 import { useEffect, useState } from 'react'
 import { useLang } from '../context/LanguageContext'
 import RichText from './editor/EditableText'
+import { plainTextFromDoc } from '../lib/editor/render-html'
+import { METRIC_GRID_COLS, metricHasValue } from '../lib/metric-visibility'
 import EditablePortrait from './EditablePortrait'
 
 export default function Hero() {
   const [isLoaded, setIsLoaded] = useState(false)
   const [videoIndex, setVideoIndex] = useState(0)
-  const { content, media, editing } = useLang()
+  const { content, media, editing, blocks, lang } = useLang()
+  // A visitor only sees stats with a value — see metric-visibility.ts.
+  const shownStats = content.stats
+    .map((_, i) => i)
+    .filter((i) => editing || metricHasValue(plainTextFromDoc(blocks[`stats.${i}.value`]?.[lang]?.json)))
   const videos = media.backgroundVideos
 
   useEffect(() => {
@@ -50,7 +56,6 @@ export default function Hero() {
 
       <div className="container-main w-full relative z-10">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-16 items-stretch">
-
           {/* Left: Content. The portrait stretches to match this column's
               natural height (see the grid's items-stretch + EditablePortrait's
               h-full), so its bottom lines up with the stats no matter how
@@ -85,18 +90,22 @@ export default function Hero() {
             </div>
 
             {/* Stats */}
-            <div className="pt-3 md:pt-4 border-t border-dark-700 grid grid-cols-3 gap-3 md:gap-6">
-              {content.stats.map((_, i) => (
-                <div key={i} className="text-center">
-                  <div className="text-xl md:text-2xl font-bold text-dark-50">
-                    <RichText blockKey={`stats.${i}.value`} section="hero" placeholder="Value" />
+            {shownStats.length > 0 && (
+              <div
+                className={`pt-3 md:pt-4 border-t border-dark-700 grid ${METRIC_GRID_COLS[shownStats.length] ?? 'grid-cols-3'} gap-3 md:gap-6`}
+              >
+                {shownStats.map((i) => (
+                  <div key={i} className="text-center">
+                    <div className="text-xl md:text-2xl font-bold text-dark-50">
+                      <RichText blockKey={`stats.${i}.value`} section="hero" placeholder="Value" />
+                    </div>
+                    <div className="text-dark-400 text-xs md:text-sm mt-1">
+                      <RichText blockKey={`stats.${i}.label`} section="hero" placeholder="Label" />
+                    </div>
                   </div>
-                  <div className="text-dark-400 text-xs md:text-sm mt-1">
-                    <RichText blockKey={`stats.${i}.label`} section="hero" placeholder="Label" />
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Right: Real photo. Was `hidden` below `md` entirely — reported

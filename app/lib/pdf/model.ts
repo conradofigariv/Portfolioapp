@@ -1,5 +1,6 @@
 import type { JSONContent } from '@tiptap/core'
 import type { Lang, MediaImage, PortfolioBlocks, PortfolioContent, PortfolioMedia } from '../portfolio'
+import { metricHasValue } from '../metric-visibility'
 
 /**
  * The portfolio as the PDF export sees it: every field already resolved to
@@ -169,7 +170,7 @@ export function buildPdfModel(input: {
 
   const stats = content.stats
     .map((_, i) => ({ value: field(`stats.${i}.value`), label: field(`stats.${i}.label`) }))
-    .filter((stat) => !isEmptyRich(stat.value) || !isEmptyRich(stat.label))
+    .filter((stat) => metricHasValue(plainText(stat.value)))
 
   const chapters = content.journey.chapters
     .map((chapter) => ({
@@ -190,7 +191,8 @@ export function buildPdfModel(input: {
         narrative: list(`${base}.narrative`),
         metrics: project.metrics
           .map((_, i) => ({ value: field(`${base}.metrics.${i}.value`), label: field(`${base}.metrics.${i}.label`) }))
-          .filter((m) => !isEmptyRich(m.value) || !isEmptyRich(m.label)),
+          // Same rule as the page: only metrics with a value (metric-visibility.ts).
+          .filter((m) => metricHasValue(plainText(m.value))),
         tags: list(`${base}.tags`),
         // The card's first photo, the same one the page shows as its cover.
         cover: imageOf(media.projectImages[project.id]?.[0], ASPECT.project),
