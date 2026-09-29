@@ -42,6 +42,26 @@ export const translations = {
         generic: 'Couldn’t save it. Try again.',
       } as Record<string, string>,
     },
+    // "How do you want to start?" (StartScreen.tsx) and the test-account
+    // reset — owner tooling, `uiT`.
+    start: {
+      kicker: (name: string) => (name ? `Welcome, ${name}` : 'Welcome'),
+      title: 'How do you want to start?',
+      intro: 'Your portfolio is already online. Pick how to fill it in — you can change everything afterwards.',
+      recommended: 'Recommended',
+      cvTitle: 'With my CV',
+      cvBody: 'Upload your CV as a PDF — or your LinkedIn profile’s — and we’ll draft your portfolio in about a minute.',
+      cvDetail: 'Jobs, education, skills and certifications',
+      scratchTitle: 'From scratch',
+      scratchBody: 'Start from the example and fill it in yourself. A short tour shows you how.',
+      scratchDetail: 'Edit right on the page',
+      later: 'You can import your CV any time from “Import CV”.',
+    },
+    testAccount: {
+      reset: 'Reset (test)',
+      confirm: 'Reset this test account to a brand-new one? Everything on it is deleted.',
+      resetting: 'Resetting…',
+    },
     // The CV import panel (EditBar's "Import CV") — owner tooling, `uiT`.
     importCv: {
       open: 'Import CV',
@@ -530,6 +550,24 @@ export const translations = {
         reserved: 'Esa dirección está reservada por la app.',
         generic: 'No se pudo guardar. Probá de nuevo.',
       } as Record<string, string>,
+    },
+    start: {
+      kicker: (name: string) => (name ? `Hola, ${name}` : 'Hola'),
+      title: '¿Cómo querés empezar?',
+      intro: 'Tu portfolio ya está online. Elegí cómo llenarlo: después podés cambiar todo.',
+      recommended: 'Recomendado',
+      cvTitle: 'Con mi CV',
+      cvBody: 'Subí tu CV en PDF —o el de tu perfil de LinkedIn— y armamos un borrador de tu portfolio en un minuto.',
+      cvDetail: 'Trabajos, formación, habilidades y certificaciones',
+      scratchTitle: 'Desde cero',
+      scratchBody: 'Empezá con el ejemplo y completalo vos. Un tour corto te muestra cómo.',
+      scratchDetail: 'Editás directo sobre la página',
+      later: 'Podés importar tu CV cuando quieras desde «Importar CV».',
+    },
+    testAccount: {
+      reset: 'Reiniciar (prueba)',
+      confirm: '¿Reiniciar esta cuenta de prueba como una cuenta nueva? Se borra todo lo que tiene.',
+      resetting: 'Reiniciando…',
     },
     importCv: {
       open: 'Importar CV',

@@ -21,6 +21,8 @@ export default function PortfolioShell({
   showTour = false,
   initialTourStep = 0,
   askUsername = false,
+  startScreen = null,
+  testAccount = false,
 }: {
   portfolio: Portfolio
   editing?: boolean
@@ -31,6 +33,10 @@ export default function PortfolioShell({
   initialTourStep?: number
   /** The owner hasn't chosen their address yet — EditBar opens the picker. */
   askUsername?: boolean
+  /** "How do you want to start?" — shown to a new owner (see StartScreen.tsx); the cookie remembers the choice. */
+  startScreen?: { cookie: string } | null
+  /** A test account (email + password) — EditBar offers "Reset as a new account". */
+  testAccount?: boolean
 }) {
   return (
     <LanguageProvider
@@ -38,6 +44,7 @@ export default function PortfolioShell({
       editing={editing}
       showTour={showTour}
       initialTourStep={initialTourStep}
+      holdTour={!!startScreen}
     >
       {previewing && (
         <div className="sticky top-0 z-[95] flex items-center justify-center gap-3 bg-dark-50 text-dark-900 text-xs font-medium py-2 px-4 text-center">
@@ -64,7 +71,12 @@ export default function PortfolioShell({
         </HideableSection>
       </main>
       <Footer />
-      <EditBar username={portfolio.username} askUsername={askUsername} />
+      <EditBar
+        username={portfolio.username}
+        askUsername={askUsername}
+        startScreen={startScreen}
+        testAccount={testAccount}
+      />
       {/* Reads its own target/state from context, so it can render nothing
           (owner not showing it) or point at anything on this page (the
           language toggle in Navbar above, the name in Hero, ...) without
