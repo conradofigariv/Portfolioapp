@@ -48,7 +48,7 @@ function buildBlocks(rows: BlockRow[]): PortfolioBlocks {
 
 // Content is stored as one JSONB document per portfolio, so a page render is a
 // single row read rather than a join across a table per section.
-function isContent(value: unknown): value is PortfolioContent {
+export function isContent(value: unknown): value is PortfolioContent {
   if (!value || typeof value !== 'object') return false
   const c = value as Partial<PortfolioContent>
   return !!c.hero && !!c.projects && !!c.journey && !!c.skills
@@ -57,7 +57,7 @@ function isContent(value: unknown): value is PortfolioContent {
 // Back-fills fields added after some documents were already saved, so an
 // older stored portfolio does not crash the page it renders on — the schema
 // is a JSONB column with no migration to run for a purely additive field.
-function normalizeContent(raw: PortfolioContent): PortfolioContent {
+export function normalizeContent(raw: PortfolioContent): PortfolioContent {
   const contact = raw.contact as Partial<PortfolioContent['contact']> | undefined
   return {
     ...raw,

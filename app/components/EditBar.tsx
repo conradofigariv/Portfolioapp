@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useLang } from '../context/LanguageContext'
 import { savePortfolio } from '../lib/portfolio-actions'
 import TranslatePanel from './TranslatePanel'
+import ImportCvPanel from './ImportCvPanel'
 import UsernamePicker from './UsernamePicker'
 
 // How long the "Saved"/"Guardado" flash stays up after a block autosaves —
@@ -22,6 +23,7 @@ export default function EditBar({ username, askUsername = false }: { username: s
   const [justSaved, setJustSaved] = useState(false)
   const [seenSavedAt, setSeenSavedAt] = useState(lastBlockSavedAt)
   const [translateOpen, setTranslateOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
   // A new owner is asked for their address once, as soon as the page opens;
   // after that "Link" opens the same picker to change it.
   const [pickerMode, setPickerMode] = useState<'first' | 'change'>(askUsername ? 'first' : 'change')
@@ -96,6 +98,14 @@ export default function EditBar({ username, askUsername = false }: { username: s
             language toggle — see "App language vs. content language". */}
         <button
           type="button"
+          onClick={() => setImportOpen(true)}
+          className="text-xs text-dark-300 hover:text-dark-50 transition"
+        >
+          {uiT.importCv.open}
+        </button>
+
+        <button
+          type="button"
           onClick={() => setTranslateOpen(true)}
           className="text-xs text-dark-300 hover:text-dark-50 transition"
         >
@@ -162,6 +172,7 @@ export default function EditBar({ username, askUsername = false }: { username: s
       </div>
 
       <TranslatePanel open={translateOpen} onClose={() => setTranslateOpen(false)} />
+      <ImportCvPanel open={importOpen} onClose={() => setImportOpen(false)} />
       <UsernamePicker
         open={pickerOpen}
         mode={pickerMode}

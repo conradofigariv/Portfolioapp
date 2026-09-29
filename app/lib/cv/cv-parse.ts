@@ -83,7 +83,13 @@ export function scrubPrivate(text: string): string {
 
 function clean(value: unknown, max: number, scrub = true): string {
   if (typeof value !== 'string') return ''
-  const flat = value.replace(/[•▪●◦·]\s*/g, '').replace(/\s+/g, ' ').trim()
+  // A bullet symbol goes; a middle dot only at the start of a line — in the
+  // middle it's a separator the CV means ("Product Manager · Fintech").
+  const flat = value
+    .replace(/^\s*[•▪●◦·]\s*/, '')
+    .replace(/\s*[•▪●◦]\s*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
   const s = scrub ? scrubPrivate(flat) : flat
   return s.length > max ? s.slice(0, max).replace(/\s+\S*$/, '') + '…' : s
 }
