@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useLang } from '../context/LanguageContext'
 import { savePortfolio } from '../lib/portfolio-actions'
 import TranslatePanel from './TranslatePanel'
+import UsernamePicker from './UsernamePicker'
 
 // How long the "Saved"/"Guardado" flash stays up after a block autosaves —
 // long enough to notice, short enough to not linger once it's stopped
@@ -14,13 +15,17 @@ const FLASH_MS = 1600
 
 // Floats above the portfolio while its owner is editing. Everyone else never
 // renders this, and the page they see is unchanged.
-export default function EditBar({ username }: { username: string }) {
+export default function EditBar({ username, askUsername = false }: { username: string; askUsername?: boolean }) {
   const { editing, dirty, draft, markSaved, lastBlockSavedAt, blockSaving, uiLang, uiT } = useLang()
   const [state, setState] = useState<'idle' | 'saving' | 'error'>('idle')
   const [error, setError] = useState<string | null>(null)
   const [justSaved, setJustSaved] = useState(false)
   const [seenSavedAt, setSeenSavedAt] = useState(lastBlockSavedAt)
   const [translateOpen, setTranslateOpen] = useState(false)
+  // A new owner is asked for their address once, as soon as the page opens;
+  // after that "Link" opens the same picker to change it.
+  const [pickerMode, setPickerMode] = useState<'first' | 'change'>(askUsername ? 'first' : 'change')
+  const [pickerOpen, setPickerOpen] = useState(askUsername)
   const router = useRouter()
 
   // Edits only live in the browser until Save actually confirms — closing the
@@ -99,6 +104,17 @@ export default function EditBar({ username }: { username: string }) {
 
         <button
           type="button"
+          onClick={() => {
+            setPickerMode('change')
+            setPickerOpen(true)
+          }}
+          className="text-xs text-dark-300 hover:text-dark-50 transition"
+        >
+          {uiT.username.open}
+        </button>
+
+        <button
+          type="button"
           onClick={onSave}
           disabled={state === 'saving' || !dirty}
           className={`button-primary text-sm py-1.5 px-4 disabled:opacity-50 overflow-hidden ${
@@ -146,6 +162,12 @@ export default function EditBar({ username }: { username: string }) {
       </div>
 
       <TranslatePanel open={translateOpen} onClose={() => setTranslateOpen(false)} />
+      <UsernamePicker
+        open={pickerOpen}
+        mode={pickerMode}
+        current={username}
+        onClose={() => setPickerOpen(false)}
+      />
     </div>
   )
 }

@@ -20,6 +20,7 @@ export default function PortfolioShell({
   previewing = false,
   showTour = false,
   initialTourStep = 0,
+  askUsername = false,
 }: {
   portfolio: Portfolio
   editing?: boolean
@@ -28,6 +29,8 @@ export default function PortfolioShell({
   // Decided server-side (owner + not previewing + not dismissed yet).
   showTour?: boolean
   initialTourStep?: number
+  /** The owner hasn't chosen their address yet — EditBar opens the picker. */
+  askUsername?: boolean
 }) {
   return (
     <LanguageProvider
@@ -61,7 +64,7 @@ export default function PortfolioShell({
         </HideableSection>
       </main>
       <Footer />
-      <EditBar username={portfolio.username} />
+      <EditBar username={portfolio.username} askUsername={askUsername} />
       {/* Reads its own target/state from context, so it can render nothing
           (owner not showing it) or point at anything on this page (the
           language toggle in Navbar above, the name in Hero, ...) without

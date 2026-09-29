@@ -1,4 +1,4 @@
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import type { Metadata } from 'next'
 import PortfolioShell from '../components/PortfolioShell'
 import { createClient } from '../lib/supabase/server'
@@ -6,6 +6,7 @@ import { loadPortfolio } from '../lib/portfolio-db'
 import { adoptDeploymentMedia } from '../lib/deployment-owner'
 import { TOUR_STEPS } from '../lib/onboarding-tour'
 import { seedStarterBlocks } from '../lib/starter-blocks'
+import { loadUsernameConfirmed, resolveUsernameRedirect } from '../lib/username-db'
 
 // Applies to every server action used on this page (per Next's own docs), and
 // is set for exactly one of them: `translateChunk`, which makes a blocking
@@ -49,8 +50,13 @@ export default async function UserPortfolioPage({
 
   // Covers both an unknown username and a draft belonging to someone else:
   // row level security hides unpublished portfolios, so this cannot be used
-  // to tell the two apart.
-  if (!loaded) notFound()
+  // to tell the two apart. An address its owner moved away from in the last
+  // 90 days leads to their new one first (migration 0018).
+  if (!loaded) {
+    const moved = await resolveUsernameRedirect(supabase, username)
+    if (moved) redirect(`/${moved}${preview === '1' ? '?preview=1' : ''}`)
+    notFound()
+  }
 
   const isOwner = !!auth.user && auth.user.id === loaded.ownerId
   // Lets the owner see exactly what a visitor sees — no edit affordances —
@@ -73,6 +79,9 @@ export default async function UserPortfolioPage({
     if (adopted || seeded) portfolio = (await loadPortfolio(supabase, username)) ?? loaded
   }
 
+  // Asked once, the first time a new owner opens their page — see UsernamePicker.
+  const askUsername = isOwner && !previewing && !(await loadUsernameConfirmed(supabase, loaded.ownerId))
+
   return (
     <PortfolioShell
       portfolio={portfolio}
@@ -84,7 +93,9 @@ export default async function UserPortfolioPage({
       // the *current* TOUR_STEPS.length (not a stored "seen" flag) is what
       // makes a step added later resurface the tour for someone who'd
       // already finished a shorter version of it — see migration 0015.
-      showTour={isOwner && !previewing && portfolio.tourStep < TOUR_STEPS.length}
+      // The tour waits until the address is chosen, so the two never overlap.
+      showTour={isOwner && !previewing && !askUsername && portfolio.tourStep < TOUR_STEPS.length}
+      askUsername={askUsername}
       initialTourStep={portfolio.tourStep}
     />
   )
