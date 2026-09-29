@@ -8,6 +8,8 @@ import BackgroundPicker from './BackgroundPicker'
 import AppLanguagePicker from './AppLanguagePicker'
 import { FlagES, FlagUS } from './FlagIcon'
 import DownloadPdfButton from './DownloadPdfButton'
+import { CvOwnerBar, UploadCvButton } from './CvControls'
+import { cvDownloadHref } from '../lib/cv/cv-download'
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false)
@@ -95,13 +97,15 @@ export default function Navbar() {
 
           <DownloadPdfButton variant="nav" />
 
-          {media.cv && (
+          {media.cv ? (
             <button
               onClick={() => setIsCVOpen(true)}
               className="button-secondary text-sm py-2"
             >
               {t.nav.viewCV}
             </button>
+          ) : (
+            editing && <UploadCvButton variant="nav" />
           )}
         </div>
 
@@ -173,7 +177,7 @@ export default function Navbar() {
               </a>
             ))}
             <DownloadPdfButton variant="menu" />
-            {media.cv && (
+            {media.cv ? (
               <button
                 onClick={() => {
                   setIsOpen(false)
@@ -183,6 +187,8 @@ export default function Navbar() {
               >
                 {t.nav.viewCV}
               </button>
+            ) : (
+              editing && <UploadCvButton variant="menu" />
             )}
           </div>
         </div>
@@ -203,7 +209,7 @@ export default function Navbar() {
                 <span className="text-dark-50 font-semibold text-sm">CV</span>
                 <div className="flex items-center gap-2">
                   <a
-                    href={media.cv}
+                    href={cvDownloadHref(media.cv, content.hero.name)}
                     download
                     className="button-secondary text-sm py-1.5"
                   >
@@ -225,6 +231,7 @@ export default function Navbar() {
                   </button>
                 </div>
               </div>
+              {editing && <CvOwnerBar onRemoved={() => setIsCVOpen(false)} />}
               <iframe
                 src={`${media.cv}#view=FitH`}
                 title="CV"
