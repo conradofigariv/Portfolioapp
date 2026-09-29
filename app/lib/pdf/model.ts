@@ -1,5 +1,5 @@
 import type { JSONContent } from '@tiptap/core'
-import type { Lang, MediaImage, PortfolioBlocks, PortfolioContent, PortfolioMedia } from '../portfolio'
+import type { HideableSection, Lang, MediaImage, PortfolioBlocks, PortfolioContent, PortfolioMedia } from '../portfolio'
 import { metricHasValue } from '../metric-visibility'
 
 /**
@@ -73,6 +73,8 @@ export type PdfModel = {
     socials: { label: string; url: string }[]
   }
   closing: Rich
+  /** Hidden from the page, so left out of the document too. */
+  hidden: HideableSection[]
 }
 
 // Image boxes in the document, width / height. Kept here (not in the layout)
@@ -225,6 +227,11 @@ export function buildPdfModel(input: {
     .map(({ title, issuer }) => ({ title, issuer }))
 
   const name = field('hero.name')
+  // Inline rather than hiddenSectionsOf: this module stays import-free.
+  const hidden = (content.hiddenSections ?? []).filter((section) =>
+    ['journey', 'projects', 'skills', 'contact'].includes(section)
+  )
+  const isHidden = (section: HideableSection) => hidden.includes(section)
 
   return {
     lang,
@@ -240,9 +247,21 @@ export function buildPdfModel(input: {
       portrait: imageOf(media.portrait, ASPECT.portrait, media.portrait?.positionMobile ?? media.portrait?.position),
     },
     stats,
-    journey: { title: field('journey.title'), chapters },
-    projects: { title: field('projects.title'), subtitle: field('projects.subtitle'), items: projects },
-    skills: { title: field('skills.title'), subtitle: field('skills.subtitle'), categories, certs },
+    // A hidden section keeps its titles but has nothing in it, which is what
+    // PortfolioDocument already skips; contact checks `hidden` itself, since
+    // its email and links also appear in the hero.
+    journey: { title: field('journey.title'), chapters: isHidden('journey') ? [] : chapters },
+    projects: {
+      title: field('projects.title'),
+      subtitle: field('projects.subtitle'),
+      items: isHidden('projects') ? [] : projects,
+    },
+    skills: {
+      title: field('skills.title'),
+      subtitle: field('skills.subtitle'),
+      categories: isHidden('skills') ? [] : categories,
+      certs: isHidden('skills') ? [] : certs,
+    },
     contact: {
       title: field('contact.title'),
       subtitle: field('contact.subtitle'),
@@ -251,6 +270,7 @@ export function buildPdfModel(input: {
       socials: content.contact.socials.filter((s) => s.label.trim() || s.url.trim()),
     },
     closing: field('footer.tagline'),
+    hidden,
   }
 }
 

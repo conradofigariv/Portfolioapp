@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from './supabase/server'
 import type { Lang, PortfolioContent } from './portfolio'
+import { HIDEABLE_SECTIONS } from './portfolio'
 import { MAX_BACKGROUND_VIDEOS, isPresetVideo } from './preset-media'
 import { TOUR_STEPS } from './onboarding-tour'
 
@@ -157,6 +158,10 @@ function sanitize(input: unknown): PortfolioContent {
       tagline: text(footer.tagline, LIMITS.line),
       rights: text(footer.rights, LIMITS.short),
     },
+    // Only known section names, each once — anything else is dropped.
+    hiddenSections: HIDEABLE_SECTIONS.filter((section) =>
+      Array.isArray(c.hiddenSections) ? (c.hiddenSections as unknown[]).includes(section) : false
+    ),
   }
 }
 

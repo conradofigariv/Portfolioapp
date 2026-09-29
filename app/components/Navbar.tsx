@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLang } from '../context/LanguageContext'
+import { hiddenSectionsOf } from '../lib/portfolio'
 import BackgroundPicker from './BackgroundPicker'
 import AppLanguagePicker from './AppLanguagePicker'
 import { FlagES, FlagUS } from './FlagIcon'
@@ -21,12 +22,15 @@ export default function Navbar() {
     .join('')
     .toUpperCase()
 
+  // A hidden section's link goes too (see HideableSection.tsx) — except for
+  // the owner while editing, who still sees the section as a collapsed bar.
+  const hidden = editing ? [] : hiddenSectionsOf(content)
   const navLinks = [
-    { label: t.nav.about, href: '#about' },
-    { label: t.nav.projects, href: '#projects' },
-    { label: t.nav.skills, href: '#skills' },
-    { label: t.nav.contact, href: '#contact' },
-  ]
+    { label: t.nav.about, href: '#about', section: 'journey' as const },
+    { label: t.nav.projects, href: '#projects', section: 'projects' as const },
+    { label: t.nav.skills, href: '#skills', section: 'skills' as const },
+    { label: t.nav.contact, href: '#contact', section: 'contact' as const },
+  ].filter((link) => !hidden.includes(link.section))
 
   return (
     <nav className="sticky top-0 z-50 bg-dark-900/95 backdrop-blur border-b border-dark-700">

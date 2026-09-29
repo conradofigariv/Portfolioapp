@@ -7,6 +7,7 @@ import ProjectTimeline from './ProjectTimeline'
 import Skills from './Skills'
 import Contact from './Contact'
 import Footer from './Footer'
+import HideableSection from './HideableSection'
 import EditBar from './EditBar'
 import OnboardingTour from './OnboardingTour'
 
@@ -46,10 +47,18 @@ export default function PortfolioShell({
       <Navbar />
       <main>
         <Hero />
-        <Journey />
-        <ProjectTimeline />
-        <Skills />
-        <Contact />
+        <HideableSection id="journey">
+          <Journey />
+        </HideableSection>
+        <HideableSection id="projects">
+          <ProjectTimeline />
+        </HideableSection>
+        <HideableSection id="skills">
+          <Skills />
+        </HideableSection>
+        <HideableSection id="contact">
+          <Contact />
+        </HideableSection>
       </main>
       <Footer />
       <EditBar username={portfolio.username} />

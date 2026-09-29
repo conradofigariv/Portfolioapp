@@ -60,6 +60,23 @@ export type PortfolioContent = {
     socials: { label: string; url: string }[]
   }
   footer: { tagline: string; rights: string }
+  /**
+   * Sections the owner hid from the page (and the PDF). Structure, not text:
+   * always written to both languages together (`updateBoth`), so a section is
+   * hidden or shown for the whole portfolio. Optional because every document
+   * saved before it existed lacks it — read through `hiddenSectionsOf`.
+   */
+  hiddenSections?: HideableSection[]
+}
+
+/** The sections an owner can hide. The hero is the page itself, so it can't be. */
+export const HIDEABLE_SECTIONS = ['journey', 'projects', 'skills', 'contact'] as const
+export type HideableSection = (typeof HIDEABLE_SECTIONS)[number]
+
+export function hiddenSectionsOf(content: Pick<PortfolioContent, 'hiddenSections'>): HideableSection[] {
+  return (content.hiddenSections ?? []).filter((s): s is HideableSection =>
+    (HIDEABLE_SECTIONS as readonly string[]).includes(s)
+  )
 }
 
 // Files are language-independent, so they are keyed by the stable id of the project
