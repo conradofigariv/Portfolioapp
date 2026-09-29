@@ -115,8 +115,15 @@ export async function generateJson(options: GeminiCallOptions): Promise<string> 
   // the one the owner configured, so a 404 there still names the right
   // variable to fix even when a fallback 503'd.
   let firstError: { err: unknown; model: string } | null = null
+  // What happened on each model, appended to the final error: the sandbox this
+  // app is built in can't reach Gemini, so a screenshot of that message is the
+  // only way to tell "every model is overloaded" from "only one was tried".
+  const tried: string[] = []
   for (const model of models) {
-    if (firstError && Date.now() - started > options.fallbackBudgetMs) break
+    if (firstError && Date.now() - started > options.fallbackBudgetMs) {
+      tried.push(`${model}: skipped`)
+      continue
+    }
     try {
       response = await client.models.generateContent({
         model,
@@ -135,13 +142,15 @@ export async function generateJson(options: GeminiCallOptions): Promise<string> 
       break
     } catch (err) {
       firstError ??= { err, model }
+      tried.push(`${model}: ${err instanceof ApiError ? err.status : 'no answer'}`)
       if (!fallsThrough(err)) break
     }
   }
   if (!response) {
-    throw new Error(
-      firstError ? describe(firstError.err, firstError.model, options.serviceName) : `The ${options.serviceName} call failed.`
-    )
+    const message = firstError
+      ? describe(firstError.err, firstError.model, options.serviceName)
+      : `The ${options.serviceName} call failed.`
+    throw new Error(`${message} [${tried.join(' · ')}]`)
   }
 
   // A blocked prompt comes back as an ordinary success with no candidate at

@@ -19,11 +19,16 @@ export type CvReadResult =
 
 type Generate = (options: GeminiCallOptions) => Promise<string>
 
-// A CV is read once, carefully: a slower answer is fine, a second model is
-// only worth trying if the first failed fast (a 503 or 404 comes back in a
-// second; a stuck request uses up the time the page has).
-const TIMEOUT_MS = 45_000
-const FALLBACK_BUDGET_MS = 12_000
+// Budgeted against the page's 60s `maxDuration`. Two attempts per model, since
+// the SDK retries a 503 after a second's pause and "overloaded" is often that
+// short — reported live as five failed imports in a row with one attempt per
+// model. The SDK can retry a timed-out request too, so the worst case is two
+// full timeouts on the first model (50s); no other model is started after 20s.
+// A 503 comes back in about a second, so an overloaded model still leaves
+// time for all the others.
+const TIMEOUT_MS = 25_000
+const ATTEMPTS = 2
+const FALLBACK_BUDGET_MS = 20_000
 
 export function isPdf(bytes: Uint8Array): boolean {
   // "%PDF-", possibly after a few junk bytes some generators leave in front.
@@ -51,7 +56,7 @@ export async function readCvBytes(bytes: Uint8Array, generate: Generate = genera
       temperature: 0.1,
       maxOutputTokens: 16384,
       timeoutMs: TIMEOUT_MS,
-      attempts: 1,
+      attempts: ATTEMPTS,
       fallbackBudgetMs: FALLBACK_BUDGET_MS,
       serviceName: 'CV reader',
       notConfigured: 'Reading CVs is not configured yet — GEMINI_API_KEY is not set.',
