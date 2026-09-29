@@ -490,7 +490,8 @@ export function PortfolioDocument({
         )}
 
         {/* Contact */}
-        {(has(contact.title) || contact.available.length > 0 || contact.email || linkedin.length > 0) && (
+        {!model.hidden.includes('contact') &&
+          (has(contact.title) || contact.available.length > 0 || contact.email || linkedin.length > 0) && (
           <View style={s.section} wrap={false}>
             <SectionHead title={contact.title} subtitle={contact.subtitle} />
             {contact.available.map((item, i) => (
