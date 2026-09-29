@@ -5,6 +5,7 @@ import { createClient } from '../lib/supabase/server'
 import { loadPortfolio } from '../lib/portfolio-db'
 import { adoptDeploymentMedia } from '../lib/deployment-owner'
 import { TOUR_STEPS } from '../lib/onboarding-tour'
+import { seedStarterBlocks } from '../lib/starter-blocks'
 
 // Applies to every server action used on this page (per Next's own docs), and
 // is set for exactly one of them: `translateChunk`, which makes a blocking
@@ -62,7 +63,14 @@ export default async function UserPortfolioPage({
       portfolioId: loaded.portfolioId,
       username: loaded.username,
     })
-    if (adopted) portfolio = (await loadPortfolio(supabase, username)) ?? loaded
+    // A new account's starter copy only exists in `content`; the page reads
+    // text from blocks. See starter-blocks.ts.
+    const seeded = await seedStarterBlocks(supabase, {
+      portfolioId: loaded.portfolioId,
+      content: loaded.content,
+      blockCount: Object.keys(loaded.blocks).length,
+    })
+    if (adopted || seeded) portfolio = (await loadPortfolio(supabase, username)) ?? loaded
   }
 
   return (
