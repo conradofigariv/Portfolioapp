@@ -155,6 +155,17 @@ export default function ProjectTimeline() {
             const projectGallery = media.projectImages[project.id] ?? []
             const photo = projectGallery[0]
             const hasGallery = projectGallery.length > 0
+            // For the card with no photo, which is drawn from the text instead:
+            // the category (a company, for a job imported from a CV) large, and
+            // its first letter as a faint watermark.
+            const cardCategory = plainTextFromDoc(blocks[`projects.items.${project.id}.tag`]?.[lang]?.json)
+            const cardMonogram = (
+              cardCategory ||
+              plainTextFromDoc(blocks[`projects.items.${project.id}.title`]?.[lang]?.json)
+            )
+              .trim()
+              .charAt(0)
+              .toUpperCase()
             // A visitor only sees metrics with a value (metric-visibility.ts);
             // with none, the whole row goes. The owner always sees all three.
             const shownMetrics = project.metrics
@@ -217,22 +228,48 @@ export default function ProjectTimeline() {
                         : 'md:opacity-0 md:translate-x-12 opacity-0 -translate-y-8'
                     }`}
                   >
-                    {/* Project visual - photo, or the portrait faded back when a project has none */}
-                    <div className="absolute inset-0 bg-gradient-to-br from-dark-700 to-dark-800">
-                      {(photo || media.portrait) && (
+                    {/* Project visual: the photo, or — with none — a card drawn
+                        from the text. That used to be the owner's portrait,
+                        faded back; fine for one project, but a CV import turns
+                        every past job into a project with no photo, and the
+                        same face behind each of them read as a mistake. The
+                        category is repeated here (it's also on the content
+                        side), so it's decorative: aria-hidden. */}
+                    {photo ? (
+                      <div className="absolute inset-0 bg-gradient-to-br from-dark-700 to-dark-800">
                         <Image
-                          src={photo ? photo.src : media.portrait!.src}
-                          alt={photo ? photo.alt : project.title}
+                          src={photo.src}
+                          alt={photo.alt}
                           fill
                           quality={90}
-                          unoptimized={photo?.src.startsWith('blob:')}
-                          style={photo ? { objectPosition: photo.position || 'left center' } : undefined}
-                          className={`transition-transform duration-500 ${hasGallery ? 'group-hover:scale-105' : ''} ${
-                            photo ? 'object-cover opacity-90' : 'object-cover object-top opacity-20 scale-110'
+                          unoptimized={photo.src.startsWith('blob:')}
+                          style={{ objectPosition: photo.position || 'left center' }}
+                          className={`object-cover opacity-90 transition-transform duration-500 ${
+                            hasGallery ? 'group-hover:scale-105' : ''
                           }`}
                         />
-                      )}
-                    </div>
+                      </div>
+                    ) : (
+                      <div className="absolute inset-0 overflow-hidden bg-gradient-to-br from-dark-800 via-dark-800/70 to-dark-900">
+                        <div className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-[#d8ff3e]/[0.05] blur-3xl" />
+                        {cardMonogram && (
+                          <span
+                            aria-hidden
+                            className="absolute -bottom-8 md:-bottom-12 right-3 md:right-6 select-none text-[10rem] md:text-[15rem] font-bold leading-none text-dark-50/[0.04]"
+                          >
+                            {cardMonogram}
+                          </span>
+                        )}
+                        {cardCategory && (
+                          <p
+                            aria-hidden
+                            className="absolute left-4 right-4 md:left-8 md:right-8 top-10 md:top-16 line-clamp-2 break-words text-2xl md:text-4xl font-bold leading-tight text-dark-100"
+                          >
+                            {cardCategory}
+                          </p>
+                        )}
+                      </div>
+                    )}
 
                     {/* Gradient for text legibility over photo */}
                     {photo && <div className="absolute inset-0 bg-gradient-to-t from-dark-900/90 via-dark-900/20 to-transparent" />}
