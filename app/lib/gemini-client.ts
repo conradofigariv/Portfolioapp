@@ -35,16 +35,45 @@ const DEFAULT_MODEL = 'gemini-3.8-flash'
  */
 const FALLBACK_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite']
 
+/** The API's own error text, out of the JSON body the SDK puts in `message`. */
+function apiMessage(err: ApiError): string {
+  const raw = err.message ?? ''
+  try {
+    const body = JSON.parse(raw.slice(raw.indexOf('{')))
+    if (typeof body?.error?.message === 'string') return body.error.message
+  } catch {
+    // Not JSON: the message is the text.
+  }
+  return raw
+}
+
 /**
  * Worth trying another model: this one doesn't exist for this key (404), is
- * rate-limited (429), is out of capacity or broken (5xx), or never answered
- * at all (a timeout or a dropped connection). *Not* a 400/401/403 — a bad
- * request or a bad key is the same on every model, and falling through would
- * only turn one clear message into three identical failures.
+ * rate-limited (429), is out of capacity or broken (5xx), never answered at
+ * all (a timeout or a dropped connection) — or rejected the request (400).
+ *
+ * A 400 used to stop the chain ("the same bad request on every model"), until
+ * a live CV import came back `[gemini-3.8-flash: 503 · gemini-3.6-flash: 400]`:
+ * a request one model accepts, another can refuse (a response schema too
+ * complex for a smaller model), so the next model is worth its one request.
+ * Only a key problem is the same everywhere: 401/403, and a 400 that says the
+ * API key is invalid.
  */
 function fallsThrough(err: unknown): boolean {
-  if (err instanceof ApiError) return err.status === 404 || err.status === 429 || err.status >= 500
+  if (err instanceof ApiError) {
+    if (err.status === 401 || err.status === 403) return false
+    if (err.status === 400) return !/api key/i.test(apiMessage(err))
+    return err.status === 404 || err.status === 429 || err.status >= 500
+  }
   return true
+}
+
+/** One model's outcome for the error's detail: the code, plus the API's reason when it's a rejection. */
+function outcome(err: unknown): string {
+  if (!(err instanceof ApiError)) return 'no answer'
+  if (err.status === 429 || err.status >= 500) return String(err.status)
+  const reason = apiMessage(err).replace(/\s+/g, ' ').trim()
+  return reason ? `${err.status} ${reason.length > 90 ? reason.slice(0, 90) + '…' : reason}` : String(err.status)
 }
 
 export type GeminiCallOptions = {
@@ -142,7 +171,7 @@ export async function generateJson(options: GeminiCallOptions): Promise<string> 
       break
     } catch (err) {
       firstError ??= { err, model }
-      tried.push(`${model}: ${err instanceof ApiError ? err.status : 'no answer'}`)
+      tried.push(`${model}: ${outcome(err)}`)
       if (!fallsThrough(err)) break
     }
   }

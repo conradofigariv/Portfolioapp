@@ -46,18 +46,23 @@ export type CvExtract = {
 }
 
 const str = (description: string): Schema => ({ type: Type.STRING, description })
-const strList = (description: string, max: number): Schema => ({
+const strList = (description: string): Schema => ({
   type: Type.ARRAY,
   items: { type: Type.STRING },
-  maxItems: String(max),
   description,
 })
 
 /**
- * The response schema Gemini is held to. `minItems`/`maxItems` are strings in
- * this SDK (see translate/gemini-translator.ts). Every property is required
- * and may be empty — "" / [] — so a missing section is explicit rather than
- * absent, and cv-parse.ts has one shape to check.
+ * The response schema Gemini is held to. Every property is required and may be
+ * empty — "" / [] — so a missing section is explicit rather than absent, and
+ * cv-parse.ts has one shape to check.
+ *
+ * **No `maxItems` anywhere, on purpose.** The first version capped every list
+ * (12 jobs, 6 highlights, 3 metrics, …), and a live import came back with a
+ * 400 from a fallback model: every bound multiplies the states the model's
+ * constrained decoding has to track, and a smaller model refuses a schema past
+ * its limit. The caps live where they can't cost a request — the prompt asks
+ * for them and `parseCvExtract` enforces them on the answer.
  */
 export const CV_RESPONSE_SCHEMA: Schema = {
   type: Type.OBJECT,
@@ -69,7 +74,6 @@ export const CV_RESPONSE_SCHEMA: Schema = {
     summary: str('The profile/summary paragraph, if any'),
     experience: {
       type: Type.ARRAY,
-      maxItems: '12',
       items: {
         type: Type.OBJECT,
         properties: {
@@ -77,11 +81,10 @@ export const CV_RESPONSE_SCHEMA: Schema = {
           role: str('Job title'),
           period: str('Dates as written'),
           location: str('City/country or "Remote", if written'),
-          highlights: strList('One achievement or responsibility per item, as written', 6),
-          tools: strList('Tools/skills named for this job', 10),
+          highlights: strList('One achievement or responsibility per item, as written'),
+          tools: strList('Tools/skills named for this job'),
           metrics: {
             type: Type.ARRAY,
-            maxItems: '3',
             items: {
               type: Type.OBJECT,
               properties: { label: str('What was measured, 1–3 words'), value: str('The number exactly as written') },
@@ -96,17 +99,15 @@ export const CV_RESPONSE_SCHEMA: Schema = {
     },
     skills: {
       type: Type.ARRAY,
-      maxItems: '8',
       items: {
         type: Type.OBJECT,
-        properties: { category: str('Group name'), items: strList('Skills in the group', 20) },
+        properties: { category: str('Group name'), items: strList('Skills in the group') },
         required: ['category', 'items'],
         propertyOrdering: ['category', 'items'],
       },
     },
     certifications: {
       type: Type.ARRAY,
-      maxItems: '15',
       items: {
         type: Type.OBJECT,
         properties: { title: str('Certification'), issuer: str('Who issued it'), year: str('Year, if written') },
@@ -116,7 +117,6 @@ export const CV_RESPONSE_SCHEMA: Schema = {
     },
     education: {
       type: Type.ARRAY,
-      maxItems: '8',
       items: {
         type: Type.OBJECT,
         properties: { institution: str('School/university'), degree: str('Degree or program'), period: str('Dates as written') },
@@ -124,7 +124,7 @@ export const CV_RESPONSE_SCHEMA: Schema = {
         propertyOrdering: ['institution', 'degree', 'period'],
       },
     },
-    languages: strList('Spoken languages with level, e.g. "English — C1"', 8),
+    languages: strList('Spoken languages with level, e.g. "English — C1"'),
     contact: {
       type: Type.OBJECT,
       properties: { email: str('Email, if written'), linkedin: str('LinkedIn URL, if written'), website: str('Personal website, if written') },
