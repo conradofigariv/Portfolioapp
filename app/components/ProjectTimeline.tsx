@@ -6,6 +6,8 @@ import Image from 'next/image'
 import { useLang } from '../context/LanguageContext'
 import { moveBeforeId } from '../lib/reorder'
 import RichText from './editor/EditableText'
+import { plainTextFromDoc } from '../lib/editor/render-html'
+import { METRIC_GRID_COLS, metricHasValue } from '../lib/metric-visibility'
 import EditableProjectGallery from './EditableProjectGallery'
 import ProjectNarrative from './ProjectNarrative'
 import ProjectTags from './ProjectTags'
@@ -20,7 +22,7 @@ function newProjectId() {
 }
 
 export default function ProjectTimeline() {
-  const { t, content, media, editing, updateBoth } = useLang()
+  const { t, content, media, editing, updateBoth, blocks, lang } = useLang()
   const p = content.projects
   const sectionRef = useRef<HTMLDivElement>(null)
   const [visibleItems, setVisibleItems] = useState<Set<number>>(new Set())
@@ -153,6 +155,15 @@ export default function ProjectTimeline() {
             const projectGallery = media.projectImages[project.id] ?? []
             const photo = projectGallery[0]
             const hasGallery = projectGallery.length > 0
+            // A visitor only sees metrics with a value (metric-visibility.ts);
+            // with none, the whole row goes. The owner always sees all three.
+            const shownMetrics = project.metrics
+              .map((_, i) => i)
+              .filter(
+                (i) =>
+                  editing ||
+                  metricHasValue(plainTextFromDoc(blocks[`projects.items.${project.id}.metrics.${i}.value`]?.[lang]?.json))
+              )
 
             return (
               <div
@@ -339,8 +350,11 @@ export default function ProjectTimeline() {
                     {/* Metrics — always exactly 3, never owner-added/removed,
                         so each is a fixed-index scalar block rather than a
                         useBlockList-managed list. */}
-                    <div className="grid grid-cols-3 gap-2 md:gap-4 mb-5 md:mb-7 py-4 md:py-5 border-y border-dark-700">
-                      {project.metrics.map((_, i) => (
+                    {shownMetrics.length > 0 && (
+                    <div
+                      className={`grid ${METRIC_GRID_COLS[shownMetrics.length] ?? 'grid-cols-3'} gap-2 md:gap-4 mb-5 md:mb-7 py-4 md:py-5 border-y border-dark-700`}
+                    >
+                      {shownMetrics.map((i) => (
                         <div key={i} className="text-center">
                           <p className="text-dark-400 text-xs uppercase tracking-wider mb-1 md:mb-2">
                             <RichText
@@ -359,6 +373,7 @@ export default function ProjectTimeline() {
                         </div>
                       ))}
                     </div>
+                    )}
 
                     {/* Tags */}
                     <ProjectTags projectId={project.id} />
